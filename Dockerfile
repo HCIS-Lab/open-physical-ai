@@ -78,7 +78,8 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --python ${VIRTUAL_ENV} \
         "isaacsim[all,extscache]==5.1.0" \
-        --extra-index-url https://pypi.nvidia.com
+        --extra-index-url https://pypi.nvidia.com && \
+    uv pip install hydra-core --upgrade
 
 # Copy the rest of the source code
 COPY . /workspace/voilab
