@@ -27,6 +27,7 @@ parser.add_argument("--session_dir", type=str, default=None)
 parser.add_argument("--x_offset", type=float, default=0.1, help="X-axis offset for coordinate calibration (meters)")
 parser.add_argument("--y_offset", type=float, default=0.15, help="Y-axis offset for coordinate calibration (meters)")
 parser.add_argument("--z_offset", type=float, default=-0.07, help="Z-axis offset for coordinate calibration (meters)")
+parser.add_argument("--teleop", type=bool, default=False, help="Whether to use teleop mode")
 args = parser.parse_args()
 
 from isaacsim import SimulationApp
@@ -59,6 +60,7 @@ from isaacsim.core.prims import SingleRigidPrim, SingleXFormPrim
 from isaacsim.core.prims import RigidPrim
 from isaacsim.storage.native import get_assets_root_path
 from isaacsim.sensors.camera import Camera
+from isaacsim.core.api.objects import DynamicCuboid
 from pxr import Usd, UsdGeom, UsdPhysics, Sdf, Gf
 
 from scipy.spatial.transform import Rotation as R, Slerp
@@ -68,6 +70,7 @@ import lula
 from pxr import UsdPhysics
 from umi_replay import set_gripper_width
 from motion_plan import PickPlace
+from teleop_controller import TeleopController
 
 
 assets_root_path = get_assets_root_path()
@@ -80,7 +83,7 @@ enable_extension("isaacsim.robot_motion.motion_generation")
 
 # --- Configuration ---
 BASE_SCENE_FP = "/workspace/voilab/assets/ED305_scene/ED305.usd"
-FRANKA_PANDA_FP = "/workspace/voilab/assets/franka_panda/franka_panda_arm.usd"
+FRANKA_PANDA_FP = "/workspace/voilab/assets/franka_panda/franka_panda_arm_v2.usd"
 FRANKA_PANDA_PRIM_PATH = "/World/Franka"
 GOPRO_PRIM_PATH = "/World/Franka/panda/panda_link7/gopro_link"
 ASSETS_DIR = "/workspace/voilab/assets/CADs"
@@ -159,6 +162,29 @@ def apply_ik_solution(panda, art_kine_solver, target_pos, target_quat_wxyz):
         return True
 
     return False
+
+def ik_solution(panda, art_kine_solver, target_pos, target_quat_wxyz):
+    """
+    Compute IK solution for target pose.
+    
+    Args:
+        panda: Panda articulation object
+        art_kine_solver: ArticulationKinematicsSolver instance
+        target_pos: Target position (3,)
+        target_quat_wxyz: Target orientation as quaternion WXYZ (4,)
+        
+    Returns:
+        ArticulationAction or None: IK solution action if successful, else None
+    """
+    action, success = art_kine_solver.compute_inverse_kinematics(
+        target_position=target_pos,
+        target_orientation=target_quat_wxyz
+    )
+
+    if success:
+        return action
+
+    return None
 
 
 class RigidPrimManager:
@@ -289,8 +315,12 @@ def _save_progress(session_dir: str, completed: set[int]) -> None:
 def _normalize_object_name(name: str) -> str:
     return name.strip().lower().replace(" ", "_")
 
-def step_world_and_record(
-    world,
+def step_world(world, render=True, sleep_dt=0.01):
+    """Advance the simulation world by one step."""
+    world.step(render=render)
+    time.sleep(sleep_dt)
+
+def record_state(
     camera,
     panda,
     lula_solver,
@@ -299,12 +329,8 @@ def step_world_and_record(
     eef_pos_list,
     eef_rot_list,
     gripper_list,
-    render=True,
-    sleep_dt=0.01,
-    ):
-    world.step(render=render)
-    time.sleep(sleep_dt)
-
+):
+    """Record sensor and robot state; returns the 6D end-effector pose."""
     # RGB
     img = camera.get_rgb()
     if img is not None:
@@ -321,26 +347,6 @@ def step_world_and_record(
     gripper_list.append([gripper_width])
 
     return eef_pose6d
-
-def _set_fixed_objects_for_episode(cfg, object_prims):
-    if cfg.get("environment_vars", {}).get("SCENE_CONFIG") != "living_scene":
-        return
-
-    fixed = cfg.get("environment_vars", {}).get("FIXED_OBJECTS", [])
-    stage = omni.usd.get_context().get_stage()
-
-    for item in fixed:
-        name = _normalize_object_name(item["name"])
-        prim = object_prims.get(name)
-        if prim is None:
-            continue
-        pos = np.array(item["position"], dtype=np.float64)
-        quat_wxyz = np.array(item["rotation_quat_wxyz"], dtype=np.float64)
-        prim.set_world_pose(position=pos, orientation=quat_wxyz)
-        prim_usd = stage.GetPrimAtPath(prim.prim_path)
-        rigid_api = UsdPhysics.RigidBodyAPI.Apply(prim_usd)
-        rigid_api.CreateRigidBodyEnabledAttr(True)
-        rigid_api.CreateKinematicEnabledAttr(True)
 
 def wxyz_to_xyzw(q_wxyz):
     return np.array([q_wxyz[1], q_wxyz[2], q_wxyz[3], q_wxyz[0]])
@@ -374,6 +380,19 @@ def plan_line_cartesian(
 
     return [np.concatenate([p, q_wxyz]) for p, q_wxyz in zip(positions, quats_wxyz)]
 
+# Fixed orientation for motin planning mode for now
+OBJECT_ORIENTATION_PRESETS = {
+    "fork": [0.707, 0.0, 0.0, 0.707],
+    "knife": [0.707, 0.0, 0.0, -0.707],
+    "blue_block": [0.707107, 0.707107, 0, 0],
+    "red_block": [0.0677732, -0.7038514, -0.0677732, -0.7038514],
+    "green_block": [0.5, 0.5, 0.5, -0.5],
+}
+def get_object_orientation(name, default_orientation=[1.0, 0.0, 0.0, 0.0]):
+    for key, quat in OBJECT_ORIENTATION_PRESETS.items():
+        if key in name.lower():
+            return np.array(quat)
+    return np.array(default_orientation)
 
 def main():
     """Main entry point."""
@@ -414,8 +433,8 @@ def main():
         end_effector_prim_path=FRANKA_PANDA_PRIM_PATH + "/panda/panda_rightfinger",
         joint_prim_names=["panda_finger_joint1", "panda_finger_joint2"],
         joint_opened_positions=np.array([0.05, 0.05]),
-        joint_closed_positions=np.array([0.02, 0.02]),
-        action_deltas=np.array([0.01, 0.01]),
+        joint_closed_positions=np.array([0.00, 0.00]),
+        action_deltas=np.array([0.005, 0.005]),
     )
 
     # Create SingleManipulator and add to world scene
@@ -517,7 +536,9 @@ def main():
     episodes_to_run = [ep for ep in range(total_episodes) if ep not in completed_episodes]
     collected_episodes = []
 
-    for episode_idx in episodes_to_run:
+    idx = 0
+    while idx < len(episodes_to_run):
+        episode_idx = episodes_to_run[idx]
         if not simulation_app.is_running():
             break
 
@@ -574,7 +595,19 @@ def main():
 
                 obj_prim = object_prims[object_name]
                 obj_pos = np.array(obj["position"], dtype=np.float64)
-                obj_prim.set_world_pose(position=obj_pos)
+
+                # Fixed orientation for motin planning mode for now
+                if not args.teleop:
+                    orientation = np.array([1.0, 0.0, 0.0, 0.0])  # w, x, y, z
+                    if args.task == "kitchen":
+                        obj_pos[0] -= 0.05
+                    else:
+                        obj_pos[2] -= 0.25
+                    orientation = get_object_orientation(object_name)
+                    obj_prim.set_world_pose(position=obj_pos, orientation=orientation)
+                else:
+                    obj_prim.set_world_pose(position=obj_pos)
+
                 print(f"[ObjectLoader] Positioned {object_name} at {obj_pos}")
 
         # Make simulation settle
@@ -590,6 +623,8 @@ def main():
             get_object_world_pose_fn=get_object_world_pose,
             apply_ik_solution_fn=apply_ik_solution,
             plan_line_cartesian_fn=plan_line_cartesian,
+            world=world,
+            task=args.task,
         )
 
         if args.task=="kitchen":
@@ -605,12 +640,20 @@ def main():
             raise RuntimeError(f"Unknown task, expected one of 'kitchen', 'dining-room', 'living-room', got {args.task}")
         
         # Motion planner initialization
-        motion_planner = registry.get_motion_planner(
-            args.task,
-            cfg,
-            get_object_world_pose_fn=get_object_world_pose,
-            pickplace=pickplace,
-        )
+        if not args.teleop:
+            motion_planner = registry.get_motion_planner(
+                args.task,
+                cfg,
+                get_object_world_pose_fn=get_object_world_pose,
+                pickplace=pickplace,
+            )
+        else: 
+            teleop_controller = TeleopController(
+                get_end_effector_pose_fn=get_end_effector_pos_quat_wxyz,
+                ik_solution_fn=ik_solution,
+                init_ee_pos = INIT_EE_POS,
+                init_ee_quat_wxyz = INIT_EE_QUAT_WXYZ,
+            )
 
         # Initialize end-effector pose
         calibrate_robot_base(panda, lula_solver)
@@ -632,31 +675,70 @@ def main():
         episode_start_pose = None
         episode_end_pose = None
 
-        while simulation_app.is_running():
+        if not args.teleop:
+            
+            print("[Main] Recording episode in motion planning mode...")
+            while simulation_app.is_running():
 
-            # Predefine motion planning to collect data
-            motion_planner.step(panda, lula_solver, art_kine_solver)
+                # Predefine motion planning to collect data
+                motion_planner.step(panda, lula_solver, art_kine_solver)
 
-            eef_pose6d = step_world_and_record(
-                world,
-                camera,
-                panda,
-                lula_solver,
-                art_kine_solver,
-                rgb_list,
-                eef_pos_list,
-                eef_rot_list,
-                gripper_list,
-                render=True,
-            )
+                step_world(world, render=True)
+                eef_pose6d = record_state(
+                    camera,
+                    panda,
+                    lula_solver,
+                    art_kine_solver,
+                    rgb_list,
+                    eef_pos_list,
+                    eef_rot_list,
+                    gripper_list,
+                )
 
-            if episode_start_pose is None:
-                episode_start_pose = eef_pose6d.copy()
+                if episode_start_pose is None:
+                    episode_start_pose = eef_pose6d.copy()
 
-            if motion_planner.is_done():
-                episode_end_pose = eef_pose6d.copy()
-                print("[Main] Motion plan finished")
-                break
+                if motion_planner.is_done():
+                    episode_end_pose = eef_pose6d.copy()
+                    print("[Main] Motion plan finished")
+                    break
+        else:
+            
+            teleop_controller.print_instructions()
+            
+            while simulation_app.is_running():
+                
+                teleop_controller.step(panda, lula_solver, art_kine_solver)
+
+                step_world(world, render=True)
+                
+                if teleop_controller.started():
+                    eef_pose6d = record_state(
+                        camera,
+                        panda,
+                        lula_solver,
+                        art_kine_solver,
+                        rgb_list,
+                        eef_pos_list,
+                        eef_rot_list,
+                        gripper_list,
+                    )
+                    
+                if teleop_controller.requested_restart():
+                    print("[Main] Teleop control requested restart, resetting episode...")
+                    break
+
+                if episode_start_pose is None and teleop_controller.started():
+                    print("[Main] Teleop control started, beginning recording...")
+                    episode_start_pose = eef_pose6d.copy()
+
+                if teleop_controller.is_done():
+                    episode_end_pose = eef_pose6d.copy()
+                    print("[Main] Teleop control finished")
+                    break
+                
+            if teleop_controller.requested_restart():
+                continue
 
         if episode_end_pose is None and eef_pos_list:
             episode_end_pose = np.concatenate([eef_pos_list[-1], eef_rot_list[-1]])
@@ -690,6 +772,8 @@ def main():
         if episode_success:
             completed_episodes.add(episode_idx)
             _save_progress(args.session_dir, completed_episodes)
+            
+        idx += 1
 
     successful_episodes = [
         ep for ep in collected_episodes
