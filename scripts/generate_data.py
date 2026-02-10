@@ -17,20 +17,17 @@ import argparse
 import numpy as np
 import time
 import sys
-from simulation_dataset_accumulator import SimulationDatasetAccumulator
 import zarr
 from zarr.storage import ZipStore
 from numcodecs import Blosc
-import cv2
-from utils import get_object_pose
+
 parser = argparse.ArgumentParser()
 parser.add_argument("--task", type=str, choices=["kitchen", "dining-room", "living-room"], required=True)
 parser.add_argument("--session_dir", type=str, default=None)
 parser.add_argument("--x_offset", type=float, default=0.1, help="X-axis offset for coordinate calibration (meters)")
 parser.add_argument("--y_offset", type=float, default=0.15, help="Y-axis offset for coordinate calibration (meters)")
 parser.add_argument("--z_offset", type=float, default=-0.07, help="Z-axis offset for coordinate calibration (meters)")
-parser.add_argument("--episode", type=int, default=0, help="Episode index (optional)")
-
+parser.add_argument("--teleop", type=bool, default=False, help="Whether to use teleop mode")
 args = parser.parse_args()
 
 from isaacsim import SimulationApp
@@ -52,18 +49,19 @@ from isaacsim.core.utils.extensions import enable_extension
 from isaacsim.core.prims import Articulation, SingleArticulation
 from isaacsim.robot_motion.motion_generation import (
     LulaKinematicsSolver,
-    ArticulationKinematicsSolver
+    ArticulationKinematicsSolver,
+    LulaTaskSpaceTrajectoryGenerator,
+    ArticulationTrajectory
 )
 from isaacsim.robot.manipulators.grippers import ParallelGripper
 from isaacsim.robot.manipulators import SingleManipulator
 from isaacsim.core.utils.viewports import set_camera_view
 from isaacsim.core.prims import SingleRigidPrim, SingleXFormPrim
-from isaacsim.core.utils.types import ArticulationAction
 from isaacsim.core.prims import RigidPrim
 from isaacsim.storage.native import get_assets_root_path
 from isaacsim.sensors.camera import Camera
+from isaacsim.core.api.objects import DynamicCuboid
 from pxr import Usd, UsdGeom, UsdPhysics, Sdf, Gf
-from scipy.spatial.transform import Rotation as R
 
 from scipy.spatial.transform import Rotation as R, Slerp
 from object_loader import load_object_transforms_from_json, map_object_name_to_asset
@@ -72,7 +70,7 @@ import lula
 from pxr import UsdPhysics
 from umi_replay import set_gripper_width
 from motion_plan import PickPlace
-
+from teleop_controller import TeleopController
 
 
 assets_root_path = get_assets_root_path()
@@ -102,115 +100,6 @@ DEBUG_DRAW = _debug_draw.acquire_debug_draw_interface()
 
 
 # Helper functions
-
-def random_yaw_from_ref(q_ref_wxyz, yaw_range_deg=90):
-    """
-    q_ref_wxyz: quaternion gốc (wxyz)
-    yaw_range_deg: random yaw trong [-yaw_range_deg, +yaw_range_deg]
-    """
-    # random yaw offset
-    yaw_offset = np.random.uniform(-yaw_range_deg, yaw_range_deg)
-
-    # ref rotation
-    R_ref = R.from_quat([
-        q_ref_wxyz[1],
-        q_ref_wxyz[2],
-        q_ref_wxyz[3],
-        q_ref_wxyz[0],
-    ])  # xyzw
-
-    # yaw rotation (around Z)
-    R_yaw = R.from_euler('z', yaw_offset, degrees=True)
-
-    # apply yaw (world Z)
-    R_new = R_yaw * R_ref
-
-    # back to wxyz
-    q_new_xyzw = R_new.as_quat()
-    q_new_wxyz = np.array([
-        q_new_xyzw[3],
-        q_new_xyzw[0],
-        q_new_xyzw[1],
-        q_new_xyzw[2],
-    ])
-
-    return q_new_wxyz, yaw_offset
-
-def get_isaac_camera_intrinsics(camera):
-    """
-    Isaac Sim camera → returns intrinsic matrix K
-    """
-    # Use getters
-    W, H = camera.get_resolution()  # returns (width, height)
-    h_fov_rad = np.deg2rad(camera.get_horizontal_fov())  # in radians
-
-    # Compute fx, fy
-    fx = W / (2 * np.tan(h_fov_rad / 2))
-    fy = fx  # assuming square pixels
-
-    # Principal point (center)
-    cx = W / 2
-    cy = H / 2
-
-    K = np.array([
-        [fx, 0, cx],
-        [0, fy, cy],
-        [0,  0, 1]
-    ], dtype=np.float32)
-
-    return K
-
-
-
-def quat_wxyz_to_rpy_deg(quat_wxyz):
-    # đổi wxyz → xyzw cho scipy
-    quat_xyzw = [
-        quat_wxyz[1],
-        quat_wxyz[2],
-        quat_wxyz[3],
-        quat_wxyz[0],
-    ]
-    rpy = R.from_quat(quat_xyzw).as_euler('xyz', degrees=True)
-    return rpy  # roll, pitch, yaw (deg)
-
-def calculate_camera_orientation(eye_pos, target_pos, up_axis=np.array([0,0,1])):
-    eye_pos = np.array(eye_pos, dtype=np.float64)
-    target_pos = np.array(target_pos, dtype=np.float64)
-
-    fwd = target_pos - eye_pos
-    norm_fwd = np.linalg.norm(fwd)
-    if norm_fwd < 1e-6:
-        # pos 與 target 太接近，使用預設方向
-        fwd = np.array([1.0, 0.0, 0.0])
-    else:
-        fwd = fwd / norm_fwd
-
-    right = np.cross(fwd, up_axis)
-    norm_right = np.linalg.norm(right)
-    if norm_right < 1e-6:
-        # fwd 與 up_axis 幾乎平行，選擇任意垂直向量
-        if abs(fwd[0]) < 0.9:
-            right = np.cross(fwd, [1,0,0])
-        else:
-            right = np.cross(fwd, [0,1,0])
-        right = right / np.linalg.norm(right)
-    else:
-        right = right / norm_right
-
-    z_axis = np.cross(right, fwd)
-    z_axis /= np.linalg.norm(z_axis)
-
-    y_axis = np.cross(z_axis, fwd)
-    y_axis /= np.linalg.norm(y_axis)
-
-    R_matrix = np.column_stack((fwd, y_axis, z_axis))
-    quat_xyzw = R.from_matrix(R_matrix).as_quat()
-    quat_wxyz = np.array([quat_xyzw[3], quat_xyzw[0], quat_xyzw[1], quat_xyzw[2]])
-
-    return quat_wxyz
-
-
-
 def get_T_world_base() -> np.ndarray:
     time = Usd.TimeCode.Default()
     stage = omni.usd.get_context().get_stage()
@@ -242,17 +131,7 @@ def calibrate_robot_base(panda, lula_solver):
         panda: Panda articulation object
         lula_solver: LulaKinematicsSolver instance
     """
-    from isaacsim.core.prims import SingleXFormPrim
-    import isaacsim.core.utils.prims as prims_utils
-    
-    # Try both common paths for Franka link0
-    base_link_path = "/World/Franka/panda/panda_link0"
-    if not prims_utils.is_prim_path_valid(base_link_path):
-        base_link_path = f"{panda.prim_path}/panda/panda_link0"
-        
-    base_link_prim = SingleXFormPrim(base_link_path)
-    robot_pos, robot_quat = base_link_prim.get_world_pose()
-    
+    robot_pos, robot_quat = panda.get_world_pose()
     lula_solver.set_robot_base_pose(
         robot_position=robot_pos,
         robot_orientation=robot_quat
@@ -283,6 +162,29 @@ def apply_ik_solution(panda, art_kine_solver, target_pos, target_quat_wxyz):
         return True
 
     return False
+
+def ik_solution(panda, art_kine_solver, target_pos, target_quat_wxyz):
+    """
+    Compute IK solution for target pose.
+    
+    Args:
+        panda: Panda articulation object
+        art_kine_solver: ArticulationKinematicsSolver instance
+        target_pos: Target position (3,)
+        target_quat_wxyz: Target orientation as quaternion WXYZ (4,)
+        
+    Returns:
+        ArticulationAction or None: IK solution action if successful, else None
+    """
+    action, success = art_kine_solver.compute_inverse_kinematics(
+        target_position=target_pos,
+        target_orientation=target_quat_wxyz
+    )
+
+    if success:
+        return action
+
+    return None
 
 
 class RigidPrimManager:
@@ -341,14 +243,19 @@ def get_object_world_size(object_prim_path: str):
 
 
 def get_end_effector_pose(panda, lula_solver, art_kine_solver) -> np.ndarray:
-    calibrate_robot_base(panda, lula_solver)
+    base_pos, base_quat = panda.get_world_pose()
+    lula_solver.set_robot_base_pose(
+        robot_position=base_pos,
+        robot_orientation=base_quat,
+    )
     ee_pos, ee_rot_matrix = art_kine_solver.compute_end_effector_pose()
     eef_rot = R.from_matrix(ee_rot_matrix[:3, :3]).as_rotvec()
     return np.concatenate([ee_pos.astype(np.float64), eef_rot.astype(np.float64)])
 
 
 def get_end_effector_pos_quat_wxyz(panda, lula_solver, art_kine_solver):
-    calibrate_robot_base(panda, lula_solver)
+    base_pos, base_quat = panda.get_world_pose()
+    lula_solver.set_robot_base_pose(robot_position=base_pos, robot_orientation=base_quat)
 
     ee_pos, ee_T = art_kine_solver.compute_end_effector_pose()  # ee_T[:3,:3] rotation
     quat_xyzw = R.from_matrix(ee_T[:3, :3]).as_quat()
@@ -357,48 +264,27 @@ def get_end_effector_pos_quat_wxyz(panda, lula_solver, art_kine_solver):
 
 
 def save_multi_episode_dataset(output_path: str, episodes: list[dict]) -> None:
-    """
-     edited to save multi-view images
-    """
-
     compressor = Blosc(cname="zstd", clevel=5, shuffle=Blosc.BITSHUFFLE)
     store = ZipStore(output_path, mode="w")
     root = zarr.group(store)
     data = root.create_group("data")
 
-    first_ep = episodes[0]
-    
-    # --- 1. Save Multi-view RGB Images ---
-    camera_rgb_keys = [k for k in first_ep.keys() if "_rgb" in k]
-    ref_camera_key = camera_rgb_keys[0] # Use for length calculation
-    
-    for key in camera_rgb_keys:
-        rgb_data = np.concatenate([ep[key] for ep in episodes], axis=0).astype(np.uint8)
-        data.create_dataset(key, data=rgb_data, compressor=compressor)
-
-    # --- 2. Save Extrinsics (NEW) ---
-    camera_ext_keys = [k for k in first_ep.keys() if "_extrinsics" in k]
-    for key in camera_ext_keys:
-        ext_data = np.concatenate([ep[key] for ep in episodes], axis=0).astype(np.float32)      # 4x4 matrices
-        data.create_dataset(key, data=ext_data, compressor=compressor)
-
-    # --- 3. Save Robot Data ---
+    rgb = np.concatenate([ep["rgb"] for ep in episodes], axis=0).astype(np.uint8)
     demo_start = np.concatenate([ep["demo_start"] for ep in episodes], axis=0).astype(np.float64)
     demo_end = np.concatenate([ep["demo_end"] for ep in episodes], axis=0).astype(np.float64)
     eef_pos = np.concatenate([ep["eef_pos"] for ep in episodes], axis=0).astype(np.float32)
     eef_rot = np.concatenate([ep["eef_rot"] for ep in episodes], axis=0).astype(np.float32)
     gripper = np.concatenate([ep["gripper"] for ep in episodes], axis=0).astype(np.float32)
 
+    data.create_dataset("camera0_rgb", data=rgb, compressor=compressor)
     data.create_dataset("robot0_demo_start_pose", data=demo_start, compressor=compressor)
     data.create_dataset("robot0_demo_end_pose", data=demo_end, compressor=compressor)
     data.create_dataset("robot0_eef_pos", data=eef_pos, compressor=compressor)
     data.create_dataset("robot0_eef_rot_axis_angle", data=eef_rot, compressor=compressor)
     data.create_dataset("robot0_gripper_width", data=gripper, compressor=compressor)
 
-    # Lengths
-    episode_lengths = [len(ep[ref_camera_key]) for ep in episodes]
+    episode_lengths = [len(ep["rgb"]) for ep in episodes]
     episode_ends = np.cumsum(episode_lengths)
-    
     meta = root.create_group("meta")
     meta.create_dataset("episode_ends", data=episode_ends)
     store.close()
@@ -407,7 +293,6 @@ def save_multi_episode_dataset(output_path: str, episodes: list[dict]) -> None:
 
 def _load_progress(session_dir: str) -> set[int]:
     progress_path = os.path.join(session_dir, ".previous_progress.json")
-    print(progress_path)
     if not os.path.exists(progress_path):
         return set()
     try:
@@ -430,69 +315,58 @@ def _save_progress(session_dir: str, completed: set[int]) -> None:
 def _normalize_object_name(name: str) -> str:
     return name.strip().lower().replace(" ", "_")
 
-def step_world_and_record(
-    world,
-    cameras,
-    panda,
-    lula_solver,
-    art_kine_solver,
-    rgb_dict_list,
-    extrinsics_dict_list,
-    eef_pos_list,
-    eef_rot_list,
-    gripper_list,
-    joint_pos_list=None, # <--- NEW
-    render=True,
-    sleep_dt=0.01,
-):
-    """
-    Khanh: modified to return multi-view images & camera extrinsics.
-    """
+def step_world(world, render=True, sleep_dt=0.01):
+    """Advance the simulation world by one step."""
     world.step(render=render)
     time.sleep(sleep_dt)
 
-    # RGB & Extrinsics: Capture from all cameras
-    frame_dict = {}
-    ext_dict = {}
-    
-    for cam_key, cam_obj in cameras.items():
-        # 1. Get RGB
-        img = cam_obj.get_rgb()
-        if img is not None:
-            frame_dict[cam_key] = img
-            
-        # 2. Get Extrinsics (Camera-to-World Matrix)
-        # Note: get_world_pose returns tuple (position, orientation_wxyz)
-        pos, quat_wxyz = cam_obj.get_world_pose()
-        
-        # Convert to 4x4 Homogeneous Matrix
-        T = np.eye(4)
-        T[:3, 3] = pos
-        # Convert WXYZ to XYZW for scipy
-        quat_xyzw = np.array([quat_wxyz[1], quat_wxyz[2], quat_wxyz[3], quat_wxyz[0]])
-        T[:3, :3] = R.from_quat(quat_xyzw).as_matrix()
-        
-        ext_dict[cam_key] = T
-
-    # Only append if we got data
-    if frame_dict:
-        rgb_dict_list.append(frame_dict)
-        extrinsics_dict_list.append(ext_dict) # <--- NEW
+def record_state(
+    camera,
+    panda,
+    lula_solver,
+    art_kine_solver,
+    rgb_list,
+    eef_pos_list,
+    eef_rot_list,
+    gripper_list,
+):
+    """Record sensor and robot state; returns the 6D end-effector pose."""
+    # RGB
+    img = camera.get_rgb()
+    if img is not None:
+        rgb_list.append(img)
 
     # End-effector pose
     eef_pose6d = get_end_effector_pose(panda, lula_solver, art_kine_solver)
     eef_pos_list.append(eef_pose6d[:3])
     eef_rot_list.append(eef_pose6d[3:])
 
-    # Gripper & Joint Positions
+    # Gripper
     joint_pos = panda.get_joint_positions()
     gripper_width = joint_pos[-2] + joint_pos[-1]
     gripper_list.append([gripper_width])
-    
-    if joint_pos_list is not None:
-        joint_pos_list.append(joint_pos)
 
     return eef_pose6d
+
+def _set_fixed_objects_for_episode(cfg, object_prims):
+    if cfg.get("environment_vars", {}).get("SCENE_CONFIG") != "living_scene":
+        return
+
+    fixed = cfg.get("environment_vars", {}).get("FIXED_OBJECTS", [])
+    stage = omni.usd.get_context().get_stage()
+
+    for item in fixed:
+        name = _normalize_object_name(item["name"])
+        prim = object_prims.get(name)
+        if prim is None:
+            continue
+        pos = np.array(item["position"], dtype=np.float64)
+        quat_wxyz = np.array(item["rotation_quat_wxyz"], dtype=np.float64)
+        prim.set_world_pose(position=pos, orientation=quat_wxyz)
+        prim_usd = stage.GetPrimAtPath(prim.prim_path)
+        rigid_api = UsdPhysics.RigidBodyAPI.Apply(prim_usd)
+        rigid_api.CreateRigidBodyEnabledAttr(True)
+        rigid_api.CreateKinematicEnabledAttr(True)
 
 def wxyz_to_xyzw(q_wxyz):
     return np.array([q_wxyz[1], q_wxyz[2], q_wxyz[3], q_wxyz[0]])
@@ -525,41 +399,6 @@ def plan_line_cartesian(
     quats_wxyz = np.array([xyzw_to_wxyz(q) for q in quats_xyzw])
 
     return [np.concatenate([p, q_wxyz]) for p, q_wxyz in zip(positions, quats_wxyz)]
-
-EE_INIT_CONFIG = {
-    "kitchen": {"offset": [-0.16, 0.0, 0.13], "orientation": [0.0081739, -0.9366365, 0.350194, 0.0030561]},
-    "dining-room": {"offset": [-0.16, 0.0, 0.13], "orientation": [0.0081739, -0.9366365, 0.350194, 0.0030561]},
-    "living-room": {"offset": [-0.1, 0.2, 0.2], "orientation": [0.0081739, -0.9366365, 0.350194, 0.0030561]},
-}
-
-def get_init_ee_pose(task_name, current_pos):
-    cfg = EE_INIT_CONFIG.get(task_name)
-    if cfg is None:
-        raise ValueError(f"Unknown task {task_name}")
-    pos = current_pos + np.array(cfg["offset"])
-    quat = np.array(cfg["orientation"])
-    return pos, quat
-
-OBJECT_ORIENTATION_PRESETS = {
-    "fork": [0.707, 0.0, 0.0, 0.707],
-    "knife": [0.707, 0.0, 0.0, -0.707],
-    "blue_block": [0.707107, 0.707107, 0, 0],
-    "red_block": [0.0677732, -0.7038514, -0.0677732, -0.7038514],
-    "green_block": [0.5, 0.5, 0.5, -0.5],
-}
-
-def get_object_orientation(name, default_orientation=[1.0, 0.0, 0.0, 0.0]):
-    for key, quat in OBJECT_ORIENTATION_PRESETS.items():
-        if key in name.lower():
-            return np.array(quat)
-    return np.array(default_orientation)
-
-CAMERA_OFFSETS = {
-    "wrist": {"pos_offset": [0.0, 0.0, 0.0], "target_offset": [0.0, 0.0, 0.0], "up_axis": [0, 0, 1]},
-    "top": {"pos_offset": [0.6, 0.0, 1.8], "target_offset": [0.6, 0.0, 0.0], "up_axis": [1, 0, 0]},
-    "angle": {"pos_offset": [1.6, -2.0, 1.3], "target_offset": [0.3, 0.0, 0.2], "up_axis": [0, 0, 1]},
-}
-
 
 
 def main():
@@ -600,11 +439,10 @@ def main():
     gripper = ParallelGripper(
         end_effector_prim_path=FRANKA_PANDA_PRIM_PATH + "/panda/panda_rightfinger",
         joint_prim_names=["panda_finger_joint1", "panda_finger_joint2"],
-        joint_opened_positions=np.array([0.04, 0.04]),
-        joint_closed_positions=np.array([0.0, 0.0]),
-        action_deltas=np.array([0.005, 0.005]),
+        joint_opened_positions=np.array([0.05, 0.05]),
+        joint_closed_positions=np.array([0.02, 0.02]),
+        action_deltas=np.array([0.01, 0.01]),
     )
-
 
     # Create SingleManipulator and add to world scene
     panda = world.scene.add(
@@ -615,39 +453,29 @@ def main():
             gripper=gripper,
         )
     )
+    cube = world.scene.add(
+        DynamicCuboid(
+            name="cube",
+            position=np.array([(4.9, 2.568295955657959, 1.0328670740127563)]),
+            prim_path="/World/Cube",
+            size=0.06,
+            color=np.array([0,0,1])
+        )
+    )
     panda.gripper.set_default_state(panda.gripper.joint_opened_positions)
+
     # Set robot position after world reset
     robot_xform.set_local_pose(
         translation=np.array(franka_translation) / stage_utils.get_stage_units(),
         orientation=np.array(franka_rotation)
     )
     set_camera_view(camera_translation, franka_translation)
-
-    cameras = {}
-
-    # 建立所有相機
-    for cam_name in CAMERA_OFFSETS.keys():
-        prim_path = f"/World/{cam_name.capitalize()}Camera"
-        if cam_name == "wrist":
-            prim_path = f"{GOPRO_PRIM_PATH}/Camera"
-        cameras[cam_name] = Camera(
-            prim_path=prim_path,
-            name=f"{cam_name}_camera",
-            position=np.array(franka_translation) + np.array(CAMERA_OFFSETS[cam_name]["pos_offset"]),
-            orientation=calculate_camera_orientation(
-                np.array(franka_translation) + np.array(CAMERA_OFFSETS[cam_name]["pos_offset"]),
-                np.array(franka_translation) + np.array(CAMERA_OFFSETS[cam_name]["target_offset"]),
-                up_axis=np.array(CAMERA_OFFSETS[cam_name]["up_axis"])
-            ),
-            resolution=(224,224)
-        )
-
-    # 初始化相機
-    for cam in cameras.values():
-        cam.initialize()
-
-    print(f"[Main] Cameras initialized: {list(cameras.keys())}")
-
+    camera = Camera(
+        prim_path=f"{GOPRO_PRIM_PATH}/Camera",
+        name="gopro_camera",
+        resolution=(224,224)
+    )
+    camera.initialize()
     world.reset()
     prim_mgr = RigidPrimManager()
 
@@ -694,14 +522,7 @@ def main():
             print(f"[ObjectLoader] ERROR: Failed to load asset {full_asset_path}: {str(e)}")
             continue
 
-        if "knife" in prim_path.lower():
-            q_ref = np.array([0.707, 0.0, 0.0, 0.707])
-            q_rand, yaw = random_yaw_from_ref(q_ref)
-        else:
-            q_ref = np.array([1, 0.0, 0.0, 0.0])
-            q_rand, yaw = random_yaw_from_ref(q_ref)
-
-        obj_prim = SingleXFormPrim(prim_path=prim_path, name=object_name, orientation=q_rand)
+        obj_prim = SingleXFormPrim(prim_path=prim_path, name=object_name, orientation=entry.get("quat_wxyz", np.array([1,0,0,0])))
         world.scene.add(obj_prim)
         object_prims[object_name] = obj_prim
         print(f"[ObjectLoader] Preloaded {raw_name} as {prim_path}")
@@ -718,12 +539,11 @@ def main():
         kinematics_solver=lula_solver,
         end_effector_frame_name="umi_tcp"
     )
+
     with open(object_poses_path, "r") as f:
         object_pose_records = json.load(f)
-    
     total_episodes = len(object_pose_records)
-    print(f"[Main] Replay initialized for {total_episodes} episodes ({len(object_pose_records)} layouts).")
-
+    print(f"[Main] Replay initialized for {total_episodes} episodes.")
 
     # --- Main simulation loop ---
     print("[Main] Starting simulation loop...")
@@ -732,12 +552,9 @@ def main():
     episodes_to_run = [ep for ep in range(total_episodes) if ep not in completed_episodes]
     collected_episodes = []
 
-    camera_intrinsics = {}
-    for key, cam in cameras.items():
-        K = get_isaac_camera_intrinsics(cam)
-        camera_intrinsics[key] = K
-        print(f"[Intrinsic] {key}:\n{K}\n")
-    for episode_idx in episodes_to_run:
+    idx = 0
+    while idx < len(episodes_to_run):
+        episode_idx = episodes_to_run[idx]
         if not simulation_app.is_running():
             break
 
@@ -754,12 +571,10 @@ def main():
 
         # Object configuration
         if object_poses_path and os.path.exists(object_poses_path):
-            # Use modulo to reuse object layouts
             object_transforms = load_object_transforms_from_json(
                 object_poses_path,
-                episode_index=episode_idx % len(object_pose_records),
+                episode_index=episode_idx,
                 aruco_tag_pose=aruco_tag_pose,
-
                 cfg=cfg,
             )
 
@@ -796,37 +611,51 @@ def main():
 
                 obj_prim = object_prims[object_name]
                 obj_pos = np.array(obj["position"], dtype=np.float64)
-                # 預設 orientation
-                orientation = np.array([1.0, 0.0, 0.0, 0.0])  # w, x, y, z
-                if args.task == "kitchen":
-                    obj_pos[0] -= 0.05
-                else:obj_pos[2] -= 0.25
-                orientation = get_object_orientation(object_name)
-                # 最後一次性設置
-                obj_prim.set_world_pose(position=obj_pos, orientation=orientation)
+                obj_prim.set_world_pose(position=obj_pos)
+                print(f"[ObjectLoader] Positioned {object_name} at {obj_pos}")
 
+        # Make simulation settle
+        for _ in range(100):
+            set_gripper_width(panda, width=0.1, threshold=0.0, step=0.05)
+            world.step(render=True)
+            time.sleep(1 / 60)
 
         curr_pos, _ = get_end_effector_pos_quat_wxyz(panda, lula_solver, art_kine_solver)
-
         get_object_world_pose = make_get_object_world_pose(prim_mgr)
         pickplace = PickPlace(
             get_end_effector_pose_fn=get_end_effector_pos_quat_wxyz,
             get_object_world_pose_fn=get_object_world_pose,
             apply_ik_solution_fn=apply_ik_solution,
             plan_line_cartesian_fn=plan_line_cartesian,
-            world=world,
-            task=args.task,
         )
 
-        INIT_EE_POS, INIT_EE_QUAT_WXYZ = get_init_ee_pose(args.task, curr_pos)
+        if args.task=="kitchen":
+            INIT_EE_POS = curr_pos + np.array([-0.16, 0., 0.13])
+            INIT_EE_QUAT_WXYZ = np.array([0.0081739, -0.9366365, 0.350194, 0.0030561])
+        elif args.task=="dining-room":
+            INIT_EE_POS = curr_pos + np.array([-0.16, 0., 0.13])
+            INIT_EE_QUAT_WXYZ = np.array([0.0081739, -0.9366365, 0.350194, 0.0030561])
+        elif args.task=="living-room":
+            INIT_EE_POS = curr_pos + np.array([-0.1, 0.2, 0.20])
+            INIT_EE_QUAT_WXYZ = np.array([0.0081739, -0.9366365, 0.350194, 0.0030561])
+        else:
+            raise RuntimeError(f"Unknown task, expected one of 'kitchen', 'dining-room', 'living-room', got {args.task}")
         
         # Motion planner initialization
-        motion_planner = registry.get_motion_planner(
-            args.task,
-            cfg,
-            get_object_world_pose_fn=get_object_world_pose,
-            pickplace=pickplace,
-        )
+        if not args.teleop:
+            motion_planner = registry.get_motion_planner(
+                args.task,
+                cfg,
+                get_object_world_pose_fn=get_object_world_pose,
+                pickplace=pickplace,
+            )
+        else: 
+            teleop_controller = TeleopController(
+                get_end_effector_pose_fn=get_end_effector_pos_quat_wxyz,
+                ik_solution_fn=ik_solution,
+                init_ee_pos = INIT_EE_POS,
+                init_ee_quat_wxyz = INIT_EE_QUAT_WXYZ,
+            )
 
         # Initialize end-effector pose
         calibrate_robot_base(panda, lula_solver)
@@ -839,97 +668,103 @@ def main():
 
         if not success:
             print("[Init] WARNING: Failed to apply EE initial pose")
-        print("Gripper after open command:", gripper.get_joint_positions())
-        for _ in range(30):
-            world.step(render=True)
-
-        rgb_dict_list = []
-        extrinsics_dict_list = []
+        
+        rgb_list = []
         eef_pos_list = []
         eef_rot_list = []
         gripper_list = []
-        joint_pos_list = []
         eef_pose6d = None
         episode_start_pose = None
         episode_end_pose = None
-        # --- 在 main 裡面，迴圈開始前建立目錄 ---
-        debug_dir = os.path.join(args.session_dir, "debug_views")
-        os.makedirs(debug_dir, exist_ok=True)
-        while simulation_app.is_running():
 
-            # Predefine motion planning to collect data
-            motion_planner.step(panda, lula_solver, art_kine_solver)
-            eef_pose6d = step_world_and_record(
-                world,
-                cameras,
-                panda,
-                lula_solver,
-                art_kine_solver,
-                rgb_dict_list,
-                extrinsics_dict_list,
-                eef_pos_list,
-                eef_rot_list,
-                gripper_list,
-                joint_pos_list=joint_pos_list,
-                render=True,
-            )
-            if episode_start_pose is None:
-                episode_start_pose = eef_pose6d.copy()
+        if not args.teleop:
+            
+            print("[Main] Recording episode in motion planning mode...")
+            while simulation_app.is_running():
 
-            if motion_planner.is_done():
-                episode_end_pose = eef_pose6d.copy()
-                print("[Main] Motion plan finished")
-                break
+                # Predefine motion planning to collect data
+                motion_planner.step(panda, lula_solver, art_kine_solver)
+
+                step_world(world, render=True)
+                eef_pose6d = record_state(
+                    camera,
+                    panda,
+                    lula_solver,
+                    art_kine_solver,
+                    rgb_list,
+                    eef_pos_list,
+                    eef_rot_list,
+                    gripper_list,
+                )
+
+                if episode_start_pose is None:
+                    episode_start_pose = eef_pose6d.copy()
+
+                if motion_planner.is_done():
+                    episode_end_pose = eef_pose6d.copy()
+                    print("[Main] Motion plan finished")
+                    break
+        else:
+            
+            teleop_controller.print_instructions()
+            
+            while simulation_app.is_running():
+                
+                teleop_controller.step(panda, lula_solver, art_kine_solver)
+
+                step_world(world, render=True)
+                
+                if teleop_controller.started():
+                    eef_pose6d = record_state(
+                        camera,
+                        panda,
+                        lula_solver,
+                        art_kine_solver,
+                        rgb_list,
+                        eef_pos_list,
+                        eef_rot_list,
+                        gripper_list,
+                    )
+                    
+                if teleop_controller.requested_restart():
+                    print("[Main] Teleop control requested restart, resetting episode...")
+                    break
+
+                if episode_start_pose is None and teleop_controller.started():
+                    print("[Main] Teleop control started, beginning recording...")
+                    episode_start_pose = eef_pose6d.copy()
+
+                if teleop_controller.is_done():
+                    episode_end_pose = eef_pose6d.copy()
+                    print("[Main] Teleop control finished")
+                    break
+                
+            if teleop_controller.requested_restart():
+                continue
 
         if episode_end_pose is None and eef_pos_list:
             episode_end_pose = np.concatenate([eef_pos_list[-1], eef_rot_list[-1]])
 
-        if not rgb_dict_list:
+        if not rgb_list:
             print(f"[Main] WARNING: No frames captured for episode {episode_idx}")
             continue
 
-        demo_start_list = np.repeat(episode_start_pose[None, :], len(rgb_dict_list), axis=0)
-        demo_end_list = np.repeat(episode_end_pose[None, :], len(rgb_dict_list), axis=0)
+        demo_start_list = np.repeat(episode_start_pose[None, :], len(rgb_list), axis=0)
+        demo_end_list = np.repeat(episode_end_pose[None, :], len(rgb_list), axis=0)
         episode_record = {
             "episode_idx": episode_idx,
+            "rgb": np.stack(rgb_list, 0),
             "eef_pos": np.stack(eef_pos_list, 0),
             "eef_rot": np.stack(eef_rot_list, 0),
             "gripper": np.stack(gripper_list, 0),
-            "joint_pos": np.stack(joint_pos_list, 0),
             "demo_start": demo_start_list,
             "demo_end": demo_end_list,
         }
-
-        # Save RGBs and Extrinsics for each camera
-        for cam_key in cameras.keys():
-            # RGB
-            frames = [step[cam_key] for step in rgb_dict_list]
-            episode_record[f"{cam_key}_rgb"] = np.stack(frames, 0)
-            
-            # Extrinsics
-            exts = [step[cam_key] for step in extrinsics_dict_list]
-            episode_record[f"{cam_key}_extrinsics"] = np.stack(exts, 0)
-        
-
-        episode_success = is_episode_completed(episode_record)
-        episode_record["success"] = episode_success
 
         episode_success = is_episode_completed(episode_record)
         episode_record["success"] = episode_success
 
         if episode_success:
-            video_path = os.path.join(debug_dir, f"episode_{episode_idx:04d}_video.mp4")
-            fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-            out = cv2.VideoWriter(video_path, fourcc, 30.0, (224 * 2, 224))
-
-            for frame_data in rgb_dict_list:
-                w = cv2.cvtColor(frame_data["wrist"], cv2.COLOR_RGB2BGR)
-                a = cv2.cvtColor(frame_data["angle"], cv2.COLOR_RGB2BGR)
-                
-                combined = cv2.hconcat([w, a])
-                out.write(combined)
-            
-            out.release()
             print("[Main] Task success")
         else:
             print("[Main] Task fail")
@@ -939,32 +774,17 @@ def main():
         if episode_success:
             completed_episodes.add(episode_idx)
             _save_progress(args.session_dir, completed_episodes)
+            
+        idx += 1
 
     successful_episodes = [
         ep for ep in collected_episodes
         if ep.get("success", False)
     ]
     print(f"[Main] Total successful trials collected: {len(successful_episodes)}")
-
     if successful_episodes:
-        # 1️⃣ 先存「這一輪新產生的 dataset」
-        new_dataset_path = os.path.join(
-            args.session_dir, "simulation_dataset.zarr.zip"
-        )
-        save_multi_episode_dataset(new_dataset_path, successful_episodes)
-
-        # 2️⃣ 再丟進「長期累積的 merged dataset」
-        merged_dataset_path = os.path.join(
-            args.session_dir, "simulation_dataset_merged.zarr.zip"
-        )
-
-        merger = SimulationDatasetAccumulator(
-            merged_path=merged_dataset_path
-        )
-
-        merger.update_with(
-            new_dataset_path=new_dataset_path
-        )
+        output_zarr = os.path.join(args.session_dir, "simulation_dataset.zarr.zip")
+        save_multi_episode_dataset(output_zarr, successful_episodes)
 
     simulation_app.close()
 
