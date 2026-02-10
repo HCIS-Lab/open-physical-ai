@@ -348,26 +348,6 @@ def record_state(
 
     return eef_pose6d
 
-def _set_fixed_objects_for_episode(cfg, object_prims):
-    if cfg.get("environment_vars", {}).get("SCENE_CONFIG") != "living_scene":
-        return
-
-    fixed = cfg.get("environment_vars", {}).get("FIXED_OBJECTS", [])
-    stage = omni.usd.get_context().get_stage()
-
-    for item in fixed:
-        name = _normalize_object_name(item["name"])
-        prim = object_prims.get(name)
-        if prim is None:
-            continue
-        pos = np.array(item["position"], dtype=np.float64)
-        quat_wxyz = np.array(item["rotation_quat_wxyz"], dtype=np.float64)
-        prim.set_world_pose(position=pos, orientation=quat_wxyz)
-        prim_usd = stage.GetPrimAtPath(prim.prim_path)
-        rigid_api = UsdPhysics.RigidBodyAPI.Apply(prim_usd)
-        rigid_api.CreateRigidBodyEnabledAttr(True)
-        rigid_api.CreateKinematicEnabledAttr(True)
-
 def wxyz_to_xyzw(q_wxyz):
     return np.array([q_wxyz[1], q_wxyz[2], q_wxyz[3], q_wxyz[0]])
 
@@ -400,6 +380,19 @@ def plan_line_cartesian(
 
     return [np.concatenate([p, q_wxyz]) for p, q_wxyz in zip(positions, quats_wxyz)]
 
+# Fixed orientation for motin planning mode for now
+OBJECT_ORIENTATION_PRESETS = {
+    "fork": [0.707, 0.0, 0.0, 0.707],
+    "knife": [0.707, 0.0, 0.0, -0.707],
+    "blue_block": [0.707107, 0.707107, 0, 0],
+    "red_block": [0.0677732, -0.7038514, -0.0677732, -0.7038514],
+    "green_block": [0.5, 0.5, 0.5, -0.5],
+}
+def get_object_orientation(name, default_orientation=[1.0, 0.0, 0.0, 0.0]):
+    for key, quat in OBJECT_ORIENTATION_PRESETS.items():
+        if key in name.lower():
+            return np.array(quat)
+    return np.array(default_orientation)
 
 def main():
     """Main entry point."""
@@ -440,8 +433,8 @@ def main():
         end_effector_prim_path=FRANKA_PANDA_PRIM_PATH + "/panda/panda_rightfinger",
         joint_prim_names=["panda_finger_joint1", "panda_finger_joint2"],
         joint_opened_positions=np.array([0.05, 0.05]),
-        joint_closed_positions=np.array([0.02, 0.02]),
-        action_deltas=np.array([0.01, 0.01]),
+        joint_closed_positions=np.array([0.00, 0.00]),
+        action_deltas=np.array([0.005, 0.005]),
     )
 
     # Create SingleManipulator and add to world scene
@@ -451,15 +444,6 @@ def main():
             name="my_franka",
             end_effector_prim_path=FRANKA_PANDA_PRIM_PATH + "/panda/panda_rightfinger",
             gripper=gripper,
-        )
-    )
-    cube = world.scene.add(
-        DynamicCuboid(
-            name="cube",
-            position=np.array([(4.9, 2.568295955657959, 1.0328670740127563)]),
-            prim_path="/World/Cube",
-            size=0.06,
-            color=np.array([0,0,1])
         )
     )
     panda.gripper.set_default_state(panda.gripper.joint_opened_positions)
@@ -611,7 +595,19 @@ def main():
 
                 obj_prim = object_prims[object_name]
                 obj_pos = np.array(obj["position"], dtype=np.float64)
-                obj_prim.set_world_pose(position=obj_pos)
+
+                # Fixed orientation for motin planning mode for now
+                if not args.teleop:
+                    orientation = np.array([1.0, 0.0, 0.0, 0.0])  # w, x, y, z
+                    if args.task == "kitchen":
+                        obj_pos[0] -= 0.05
+                    else:
+                        obj_pos[2] -= 0.25
+                    orientation = get_object_orientation(object_name)
+                    obj_prim.set_world_pose(position=obj_pos, orientation=orientation)
+                else:
+                    obj_prim.set_world_pose(position=obj_pos)
+
                 print(f"[ObjectLoader] Positioned {object_name} at {obj_pos}")
 
         # Make simulation settle
@@ -627,6 +623,8 @@ def main():
             get_object_world_pose_fn=get_object_world_pose,
             apply_ik_solution_fn=apply_ik_solution,
             plan_line_cartesian_fn=plan_line_cartesian,
+            world=world,
+            task=args.task,
         )
 
         if args.task=="kitchen":
