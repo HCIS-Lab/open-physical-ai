@@ -1,0 +1,62 @@
+[project]
+name = "opai"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "author31", email = "wi072815.tw@gmail.com" }
+]
+requires-python = ">=3.10"
+dependencies = [
+    "jupyterlab>=4.5.6",
+    "opencv-contrib-python>=4.13.0.92",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pyright>=1.1.308",
+    "ruff>=0.9.3",
+    "pre-commit==3.3.2",
+    "pytest",
+]
+
+[project.scripts]
+opai = "opai:main"
+
+[build-system]
+requires = ["uv_build>=0.8.14,<0.9.0"]
+build-backend = "uv_build"
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+
+[tool.ruff]
+lint.select = [
+    "E",  # pycodestyle errors.
+    "F",  # Pyflakes rules.
+    "PLC",  # Pylint convention warnings.
+    "PLE",  # Pylint errors.
+    "PLR",  # Pylint refactor recommendations.
+    "PLW",  # Pylint warnings.
+    "I",  # Import sorting.
+]
+lint.ignore = [
+    "E731",  # Do not assign a lambda expression, use a def.
+    "E741",  # Ambiguous variable name. (l, O, or I)
+    "E501",  # Line too long.
+    "E721",  # Do not compare types, use `isinstance()`.
+    "F722",  # Forward annotation false positive from jaxtyping. Should be caught by pyright.
+    "F821",  # Forward annotation false positive from jaxtyping. Should be caught by pyright.
+    "PLR2004",  # Magic value used in comparison.
+    "PLR0915",  # Too many statements.
+    "PLR0913",  # Too many arguments.
+    "PLC0414",  # Import alias does not rename variable. (this is used for exporting names)
+    "PLC0415",  # Import should be at the top-level of a file.
+    "PLC1901",  # Use falsey strings.
+    "PLR5501",  # Use `elif` instead of `else if`.
+    "PLR0911",  # Too many return statements.
+    "PLR0912",  # Too many branches.
+    "PLW0603",  # Global statement updates are discouraged.
+    "PLW2901",  # For loop variable overwritten.
+    "PLW0642",  # Reassigned self in instance method.
+]
