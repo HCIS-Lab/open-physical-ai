@@ -1,5 +1,6 @@
+from __future__ import annotations
+
 from types import SimpleNamespace
-from typing import Tuple
 
 import numpy as np
 import pytest
@@ -79,7 +80,7 @@ def test_compute_mse_reprojection_error_averages_squared_pixel_error(
     observed_corners = [np.array([[[1.0, 1.0]], [[4.0, 4.0]]], dtype=np.float32)]
     observed_ids = [np.array([[0], [1]], dtype=np.int32)]
 
-    def fake_project_points(**_: object) -> Tuple[np.ndarray, None]:
+    def fake_project_points(**_: np.ndarray) -> tuple[np.ndarray, None]:
         return np.array([[[2.0, 3.0]], [[5.0, 6.0]]], dtype=np.float32), None
 
     monkeypatch.setattr(

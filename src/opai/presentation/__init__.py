@@ -1,3 +1,21 @@
-from opai.presentation.facade import calibrate, get_context, init, main
+from opai.presentation.facade import (
+    add_demos,
+    add_mapping,
+    browse_session,
+    calibrate,
+    get_context,
+    init,
+    list_sessions,
+    main,
+)
 
-__all__ = ["calibrate", "get_context", "init", "main"]
+__all__ = [
+    "add_demos",
+    "add_mapping",
+    "browse_session",
+    "calibrate",
+    "get_context",
+    "init",
+    "list_sessions",
+    "main",
+]

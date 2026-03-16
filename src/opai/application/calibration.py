@@ -1,4 +1,6 @@
-from typing import Any, List, Sequence, Tuple
+from __future__ import annotations
+
+from collections.abc import Sequence
 
 import cv2
 import numpy as np
@@ -37,8 +39,8 @@ def calibrate(
     image_height, image_width = _get_frame_size(frames)
     image_size = (image_width, image_height)
 
-    all_charuco_corners = []  # type: List[np.ndarray]
-    all_charuco_ids = []  # type: List[np.ndarray]
+    all_charuco_corners: list[np.ndarray] = []
+    all_charuco_ids: list[np.ndarray] = []
 
     for frame in frames:
         grayscale = _to_grayscale(frame)
@@ -124,14 +126,14 @@ def _validate_inputs(
             )
 
 
-def _resolve_dictionary(name: str) -> Any:
+def _resolve_dictionary(name: str) -> cv2.aruco.Dictionary:
     dictionary_id = getattr(cv2.aruco, name, None)
     if dictionary_id is None:
         raise OPAIValidationError(f"Unsupported ArUco dictionary: {name}")
     return cv2.aruco.getPredefinedDictionary(dictionary_id)
 
 
-def _get_frame_size(frames: Sequence[np.ndarray]) -> Tuple[int, int]:
+def _get_frame_size(frames: Sequence[np.ndarray]) -> tuple[int, int]:
     height, width = frames[0].shape[:2]
     return int(height), int(width)
 
@@ -143,7 +145,7 @@ def _to_grayscale(frame: np.ndarray) -> np.ndarray:
 
 
 def _compute_mse_reprojection_error(
-    board: Any,
+    board: cv2.aruco.CharucoBoard,
     charuco_corners: Sequence[np.ndarray],
     charuco_ids: Sequence[np.ndarray],
     rvecs: Sequence[np.ndarray],

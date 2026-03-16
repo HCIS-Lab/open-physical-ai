@@ -1,5 +1,8 @@
+from __future__ import annotations
+
 from dataclasses import dataclass
-from typing import Any
+
+import numpy as np
 
 
 @dataclass
@@ -22,5 +25,5 @@ class CalibrationResult:
     image_width: int
     intrinsic_type: str
     intrinsics: CalibrationIntrinsics
-    camera_matrix: Any
-    dist_coeffs: Any
+    camera_matrix: np.ndarray
+    dist_coeffs: np.ndarray
