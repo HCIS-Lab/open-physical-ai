@@ -10,6 +10,7 @@ requires-python = ">=3.10"
 dependencies = [
     "jupyterlab>=4.5.6",
     "opencv-contrib-python>=4.13.0.92",
+    "rich>=14.1.0",
 ]
 
 [project.optional-dependencies]

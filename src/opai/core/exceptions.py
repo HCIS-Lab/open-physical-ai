@@ -1,4 +1,4 @@
-from typing import Any, Dict, Optional
+from __future__ import annotations
 
 
 class OPAIError(Exception):
@@ -9,15 +9,17 @@ class OPAIError(Exception):
     def __init__(
         self,
         message: str,
-        error_code: Optional[str] = None,
-        details: Optional[Dict[str, Any]] = None,
+        error_code: str | None = None,
+        details: dict[str, str | int | float | bool | None] | None = None,
     ) -> None:
         self.message = message
         self.error_code = error_code or self.default_error_code
         self.details = details or {}
         super().__init__(message)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(
+        self,
+    ) -> dict[str, str | dict[str, str | int | float | bool | None]]:
         return {
             "error_code": self.error_code,
             "message": self.message,

@@ -36,7 +36,7 @@ Users interact with `opai` directly from notebook cells. The package root is the
 - Resolves the active global context and forwards calls into the application layer.
 
 ## Public API Design
-The public API should be short and stable. Prefer this style:
+The public API should be short and stable. Prefer this style (examples):
 
 ```python
 ctx = opai.init(name: str) -> Context
@@ -144,6 +144,9 @@ Outcome:
 - Make artifact creation deterministic where possible.
 - Make errors notebook-friendly and actionable.
 - Fail fast on required dependencies. If a feature depends on a package that is required by this repo, import it normally and let missing dependencies fail at import time rather than adding deferred runtime guards. Reserve lazy imports or fallback guards for truly optional integrations only.
+- Do not import types from the `typing` module. Python 3.10+ native annotations are the repo standard.
+- Prefer built-in generics such as `list[str]`, `dict[str, object]`, `tuple[int, ...]`, and unions like `Path | None`.
+- When a protocol-style annotation is needed, import it from `collections.abc` instead of `typing`.
 
 ## Open Design Points To Resolve In Implementation
 These decisions must be made consistently across the package:

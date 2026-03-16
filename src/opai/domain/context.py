@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -6,3 +8,4 @@ from pathlib import Path
 class Context:
     name: str
     session_directory: Path
+    manifest_path: Path | None = None

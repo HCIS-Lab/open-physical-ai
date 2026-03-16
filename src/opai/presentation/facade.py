@@ -1,4 +1,10 @@
-from typing import Any, Sequence
+from __future__ import annotations
+
+import re
+from collections.abc import Sequence
+from pathlib import Path
+
+import numpy as np
 
 from opai.core.exceptions import (
     OPAIContextError,
@@ -7,13 +13,15 @@ from opai.core.exceptions import (
 )
 from opai.domain.calibration import CalibrationResult
 from opai.domain.context import Context
+from opai.domain.session import DemoAsset, MappingAsset
 from opai.infrastructure.context_store import get_active_context, init_context
+
+_SESSION_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 
 
 def init(name: str) -> Context:
-    if not name.strip():
-        raise OPAIValidationError("Session name must be a non-empty string.")
-    return init_context(name)
+    normalized_name = _normalize_session_name(name)
+    return init_context(normalized_name)
 
 
 def get_context() -> Context:
@@ -26,7 +34,7 @@ def get_context() -> Context:
 
 
 def calibrate(
-    frames: Sequence[Any],
+    frames: Sequence[np.ndarray],
     row_count: int,
     col_count: int,
     square_length: float,
@@ -53,5 +61,65 @@ def calibrate(
     )
 
 
+def add_demos(video_paths: Sequence[str | Path]) -> tuple[DemoAsset, ...]:
+    ctx = get_context()
+    from opai.application.session import add_demos as add_demos_with_context
+
+    return add_demos_with_context(ctx, video_paths)
+
+
+def add_mapping(video_path: str | Path) -> MappingAsset:
+    ctx = get_context()
+    from opai.application.session import add_mapping as add_mapping_with_context
+
+    return add_mapping_with_context(ctx, video_path)
+
+
+def list_sessions() -> list[str]:
+    from opai.application.session import list_sessions as list_available_sessions
+
+    return list_available_sessions()
+
+
+def browse_session(name: str) -> list[str]:
+    normalized_name = _normalize_session_name(name)
+    try:
+        from rich.console import Console
+        from rich.tree import Tree
+    except ModuleNotFoundError as exc:
+        raise OPAIDependencyError(
+            "Session browsing requires the 'rich' package. Install project dependencies before calling opai.browse_session(...)."
+        ) from exc
+
+    from opai.application.session import browse_session as browse_named_session
+
+    file_paths, tree_payload = browse_named_session(normalized_name)
+    tree = Tree(normalized_name)
+    _append_tree_nodes(tree, tree_payload)
+    Console().print(tree)
+    return file_paths
+
+
 def main() -> None:
-    print("Use opai.init(name) and opai.calibrate(...) from Python.")
+    print(
+        "Use opai.init(name), opai.add_demos(...), opai.add_mapping(...), and opai.calibrate(...) from Python."
+    )
+
+
+def _normalize_session_name(name: str) -> str:
+    if not isinstance(name, str) or not name.strip():
+        raise OPAIValidationError("Session name must be a non-empty string.")
+    normalized_name = name.strip()
+    if not _SESSION_NAME_PATTERN.fullmatch(normalized_name):
+        raise OPAIValidationError(
+            "Session name may only contain letters, numbers, '.', '_' and '-'.",
+            details={"session_name": normalized_name},
+        )
+    return normalized_name
+
+
+def _append_tree_nodes(tree, payload: dict[str, dict]) -> None:
+    for name, child in payload.items():
+        branch = tree.add(name)
+        if isinstance(child, dict):
+            _append_tree_nodes(branch, child)
