@@ -143,6 +143,7 @@ Outcome:
 - Avoid hidden filesystem writes outside the session directory.
 - Make artifact creation deterministic where possible.
 - Make errors notebook-friendly and actionable.
+- Fail fast on required dependencies. If a feature depends on a package that is required by this repo, import it normally and let missing dependencies fail at import time rather than adding deferred runtime guards. Reserve lazy imports or fallback guards for truly optional integrations only.
 
 ## Open Design Points To Resolve In Implementation
 These decisions must be made consistently across the package:
