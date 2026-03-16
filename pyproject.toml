@@ -1,0 +1,20 @@
+[project]
+name = "opai"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "author31", email = "wi072815.tw@gmail.com" }
+]
+requires-python = ">=3.10"
+dependencies = [
+    "jupyterlab>=4.5.6",
+    "opencv-contrib-python>=4.13.0.92",
+]
+
+[project.scripts]
+opai = "opai:main"
+
+[build-system]
+requires = ["uv_build>=0.8.14,<0.9.0"]
+build-backend = "uv_build"
