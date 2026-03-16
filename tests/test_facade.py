@@ -6,10 +6,11 @@ import pytest
 
 import opai
 from opai.application import calibration as calibration_module
+from opai.core.exceptions import OPAIContextError
 
 
 def test_calibrate_requires_context() -> None:
-    with pytest.raises(RuntimeError, match="Call opai.init"):
+    with pytest.raises(OPAIContextError, match="Call opai.init"):
         opai.calibrate([], 3, 3, 1.0, 0.5, "DICT_4X4_50")
 
 

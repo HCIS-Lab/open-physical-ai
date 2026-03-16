@@ -1,5 +1,10 @@
 from typing import Any, Sequence
 
+from opai.core.exceptions import (
+    OPAIContextError,
+    OPAIDependencyError,
+    OPAIValidationError,
+)
 from opai.domain.calibration import CalibrationResult
 from opai.domain.context import Context
 from opai.infrastructure.context_store import get_active_context, init_context
@@ -7,14 +12,14 @@ from opai.infrastructure.context_store import get_active_context, init_context
 
 def init(name: str) -> Context:
     if not name.strip():
-        raise ValueError("Session name must be a non-empty string.")
+        raise OPAIValidationError("Session name must be a non-empty string.")
     return init_context(name)
 
 
 def get_context() -> Context:
     ctx = get_active_context()
     if ctx is None:
-        raise RuntimeError(
+        raise OPAIContextError(
             "No active context found. Call opai.init(name) before notebook-facing operations."
         )
     return ctx
@@ -32,7 +37,7 @@ def calibrate(
     try:
         from opai.application.calibration import calibrate as calibrate_with_context
     except ModuleNotFoundError as exc:
-        raise RuntimeError(
+        raise OPAIDependencyError(
             "Calibration dependencies are unavailable. Install the project's "
             "OpenCV calibration stack before calling opai.calibrate(...)."
         ) from exc

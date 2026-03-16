@@ -1,8 +1,9 @@
 from typing import Any, List, Sequence, Tuple
 
-import numpy as np
 import cv2
+import numpy as np
 
+from opai.core.exceptions import OPAIValidationError, OPAIWorkflowError
 from opai.domain.calibration import CalibrationIntrinsics, CalibrationResult
 from opai.domain.context import Context
 from opai.infrastructure.persistence import write_calibration_result
@@ -58,7 +59,7 @@ def calibrate(
         all_charuco_ids.append(charuco_ids)
 
     if not all_charuco_corners:
-        raise ValueError(
+        raise OPAIWorkflowError(
             "Calibration failed: no frames produced enough ChArUco corners. "
             "Verify the board parameters and frame content."
         )
@@ -83,7 +84,9 @@ def calibrate(
     )
 
     result = CalibrationResult(
-        mse_reproj_error=float(mse_reproj_error if np.isfinite(mse_reproj_error) else ret),
+        mse_reproj_error=float(
+            mse_reproj_error if np.isfinite(mse_reproj_error) else ret
+        ),
         image_height=image_height,
         image_width=image_width,
         intrinsic_type="FISHEYE",
@@ -103,24 +106,28 @@ def _validate_inputs(
     marker_length: float,
 ) -> None:
     if not frames:
-        raise ValueError("Calibration requires a non-empty list of frames.")
+        raise OPAIValidationError("Calibration requires a non-empty list of frames.")
     if row_count <= 1 or col_count <= 1:
-        raise ValueError("row_count and col_count must both be greater than 1.")
+        raise OPAIValidationError(
+            "row_count and col_count must both be greater than 1."
+        )
     if square_length <= 0 or marker_length <= 0:
-        raise ValueError("square_length and marker_length must be positive.")
+        raise OPAIValidationError("square_length and marker_length must be positive.")
     if marker_length >= square_length:
-        raise ValueError("marker_length must be smaller than square_length.")
+        raise OPAIValidationError("marker_length must be smaller than square_length.")
 
     first_shape = frames[0].shape[:2]
     for frame in frames:
         if frame.shape[:2] != first_shape:
-            raise ValueError("All frames must have identical image dimensions.")
+            raise OPAIValidationError(
+                "All frames must have identical image dimensions."
+            )
 
 
 def _resolve_dictionary(name: str) -> Any:
     dictionary_id = getattr(cv2.aruco, name, None)
     if dictionary_id is None:
-        raise ValueError(f"Unsupported ArUco dictionary: {name}")
+        raise OPAIValidationError(f"Unsupported ArUco dictionary: {name}")
     return cv2.aruco.getPredefinedDictionary(dictionary_id)
 
 
@@ -148,10 +155,10 @@ def _compute_mse_reprojection_error(
     squared_error_sum = 0.0
     point_count = 0
 
-    if not (
-        len(charuco_corners) == len(charuco_ids) == len(rvecs) == len(tvecs)
-    ):
-        raise ValueError("Calibration failed: inconsistent reprojection input lengths.")
+    if not (len(charuco_corners) == len(charuco_ids) == len(rvecs) == len(tvecs)):
+        raise OPAIWorkflowError(
+            "Calibration failed: inconsistent reprojection input lengths."
+        )
 
     for observed_corners, observed_ids, rvec, tvec in zip(
         charuco_corners,
@@ -172,7 +179,9 @@ def _compute_mse_reprojection_error(
         point_count += int(deltas.shape[0])
 
     if point_count == 0:
-        raise ValueError("Calibration failed: unable to compute reprojection error.")
+        raise OPAIWorkflowError(
+            "Calibration failed: unable to compute reprojection error."
+        )
     return squared_error_sum / point_count
 
 
