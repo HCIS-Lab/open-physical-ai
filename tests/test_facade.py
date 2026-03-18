@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import json
 import sys
 from builtins import __import__ as builtin_import
@@ -165,8 +167,39 @@ def test_list_sessions_returns_names(tmp_path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
     opai.init("session-b")
     opai.init("session-a")
+    recorder = _install_fake_rich(monkeypatch)
 
     assert opai.list_sessions() == ["session-a", "session-b"]
+    tree = recorder["prints"][0][0]
+    assert tree.label.startswith("[bold].opai_sessions[/]")
+    assert [child.label for child in tree.children] == [
+        "[bold cyan]session-a[/] [dim](current, demos=0, mapping=no, files=1)[/]",
+        "[bold cyan]session-b[/] [dim](demos=0, mapping=no, files=1)[/]",
+    ]
+
+
+def test_list_sessions_shows_empty_state(tmp_path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    recorder = _install_fake_rich(monkeypatch)
+
+    assert opai.list_sessions() == []
+    tree = recorder["prints"][0][0]
+    assert tree.label.startswith("[bold].opai_sessions[/]")
+    assert [child.label for child in tree.children] == ["[yellow]No sessions found[/]"]
+
+
+def test_list_sessions_requires_rich(tmp_path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+
+    def fake_import(name, globals=None, locals=None, fromlist=(), level=0):
+        if name.startswith("rich"):
+            raise ModuleNotFoundError("No module named 'rich'")
+        return builtin_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr("builtins.__import__", fake_import)
+
+    with pytest.raises(OPAIDependencyError, match="rich"):
+        opai.list_sessions()
 
 
 def test_browse_session_returns_files_without_changing_active_context(
@@ -177,12 +210,27 @@ def test_browse_session_returns_files_without_changing_active_context(
     demo_path = tmp_path / "demo.mp4"
     demo_path.write_bytes(b"demo")
     opai.add_demos([demo_path])
-    _install_fake_rich(monkeypatch)
+    recorder = _install_fake_rich(monkeypatch)
 
     files = opai.browse_session("session-001")
 
     assert "captures/demos/demo-0001/demo.mp4" in files
     assert opai.get_context().name == ctx.name
+    tree = recorder["prints"][0][0]
+    assert tree.label.startswith("[bold].opai_sessions[/]")
+    session_branch = tree.children[0]
+    assert session_branch.label == (
+        "[bold magenta]session-001[/] "
+        "[dim](path=session-001, demos=1, mapping=no, files=2)[/]"
+    )
+    assert (
+        session_branch.children[0].label
+        == f"[dim]path:[/] [cyan]{ctx.session_directory}[/]"
+    )
+    assert [child.label for child in session_branch.children[1:]] == [
+        "[bold blue]captures/[/]",
+        "[green]session.json[/]",
+    ]
 
 
 def test_browse_session_requires_rich(tmp_path, monkeypatch) -> None:
@@ -252,10 +300,15 @@ def _build_fake_cv2() -> SimpleNamespace:
     )
 
 
-def _install_fake_rich(monkeypatch: pytest.MonkeyPatch) -> None:
+def _install_fake_rich(
+    monkeypatch: pytest.MonkeyPatch,
+) -> dict[str, list[tuple[object, ...]]]:
+    recorder: dict[str, list[tuple[object, ...]]] = {"prints": []}
+
     class FakeTree:
-        def __init__(self, label: str) -> None:
+        def __init__(self, label: str, **kwargs) -> None:
             self.label = label
+            self.kwargs = kwargs
             self.children = []
 
         def add(self, label: str):
@@ -265,6 +318,7 @@ def _install_fake_rich(monkeypatch: pytest.MonkeyPatch) -> None:
 
     class FakeConsole:
         def print(self, *_args, **_kwargs) -> None:
+            recorder["prints"].append(_args)
             return None
 
     monkeypatch.setitem(sys.modules, "rich", SimpleNamespace())
@@ -272,3 +326,4 @@ def _install_fake_rich(monkeypatch: pytest.MonkeyPatch) -> None:
         sys.modules, "rich.console", SimpleNamespace(Console=FakeConsole)
     )
     monkeypatch.setitem(sys.modules, "rich.tree", SimpleNamespace(Tree=FakeTree))
+    return recorder

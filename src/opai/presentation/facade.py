@@ -76,28 +76,56 @@ def add_mapping(video_path: str | Path) -> MappingAsset:
 
 
 def list_sessions() -> list[str]:
-    from opai.application.session import list_sessions as list_available_sessions
+    Console, Tree = _load_rich_components()
+    from opai.application.session import describe_sessions
 
-    return list_available_sessions()
+    catalog = describe_sessions()
+    console = Console()
+    tree = Tree(
+        f"[bold]{catalog.root_dirname}[/] [dim]{catalog.root_path}[/]",
+        guide_style="dim",
+    )
+    session_names = [session.name for session in catalog.sessions]
+    if not catalog.sessions:
+        tree.add("[yellow]No sessions found[/]")
+        console.print(tree)
+        return session_names
+
+    for session in catalog.sessions:
+        tags: list[str] = []
+        if session.is_active:
+            tags.append("current")
+        tags.append(f"demos={session.demo_count}")
+        tags.append(f"mapping={'yes' if session.has_mapping else 'no'}")
+        tags.append(f"files={session.file_count}")
+        tree.add(f"[bold cyan]{session.name}[/] [dim]({', '.join(tags)})[/]")
+    console.print(tree)
+    return session_names
 
 
 def browse_session(name: str) -> list[str]:
     normalized_name = _normalize_session_name(name)
-    try:
-        from rich.console import Console
-        from rich.tree import Tree
-    except ModuleNotFoundError as exc:
-        raise OPAIDependencyError(
-            "Session browsing requires the 'rich' package. Install project dependencies before calling opai.browse_session(...)."
-        ) from exc
+    Console, Tree = _load_rich_components()
+    from opai.application.session import describe_session
 
-    from opai.application.session import browse_session as browse_named_session
-
-    file_paths, tree_payload = browse_named_session(normalized_name)
-    tree = Tree(normalized_name)
-    _append_tree_nodes(tree, tree_payload)
-    Console().print(tree)
-    return file_paths
+    view = describe_session(normalized_name)
+    console = Console()
+    tree = Tree(
+        f"[bold]{view.root_dirname}[/] [dim]{view.root_path}[/]",
+        guide_style="dim",
+    )
+    session_branch = tree.add(
+        "[bold magenta]"
+        f"{view.session_name}"
+        "[/] [dim]"
+        f"(path={view.session_path.name}, demos={view.demo_count}, "
+        f"mapping={'yes' if view.has_mapping else 'no'}, files={view.file_count})"
+        "[/]"
+    )
+    session_branch.add(f"[dim]path:[/] [cyan]{view.session_path}[/]")
+    _append_tree_nodes(session_branch, view.tree_payload)
+    console.print(tree)
+    return list(view.file_paths)
 
 
 def main() -> None:
@@ -120,6 +148,19 @@ def _normalize_session_name(name: str) -> str:
 
 def _append_tree_nodes(tree, payload: dict[str, dict]) -> None:
     for name, child in payload.items():
-        branch = tree.add(name)
-        if isinstance(child, dict):
+        is_directory = isinstance(child, dict) and bool(child)
+        label = f"[bold blue]{name}/[/]" if is_directory else f"[green]{name}[/]"
+        branch = tree.add(label)
+        if is_directory:
             _append_tree_nodes(branch, child)
+
+
+def _load_rich_components():
+    try:
+        from rich.console import Console
+        from rich.tree import Tree
+    except ModuleNotFoundError as exc:
+        raise OPAIDependencyError(
+            "Session browsing requires the 'rich' package. Install project dependencies before calling opai.list_sessions(...) or opai.browse_session(...)."
+        ) from exc
+    return Console, Tree
