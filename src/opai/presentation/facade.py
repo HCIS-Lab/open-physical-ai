@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html
 import re
 from collections.abc import Sequence
 from pathlib import Path
@@ -27,6 +28,7 @@ from opai.domain.calibration import (
 )
 from opai.domain.context import Context
 from opai.domain.plot import plot_frames
+from opai.domain.gopro import GPThumbnail
 from opai.domain.session import DemoAsset, MappingAsset
 from opai.infrastructure.context_store import get_active_context, init_context
 
@@ -257,6 +259,31 @@ def list_sessions() -> list[str]:
     tree = Tree(
         f"[bold]{catalog.root_dirname}[/] [dim]{catalog.root_path}[/]",
         guide_style="dim",
+    from opai.application.session import browse_session as browse_named_session
+
+    file_paths, tree_payload = browse_named_session(normalized_name)
+    tree = Tree(normalized_name)
+    _append_tree_nodes(tree, tree_payload)
+    Console().print(tree)
+    return file_paths
+
+
+def register_gopro(serial_number: str, download_thumbnails: bool = True) -> None:
+    ctx = get_context()
+    try:
+        from opai.application.gopro import register_gopro as register_gopro_with_context
+    except ModuleNotFoundError as exc:
+        raise OPAIDependencyError(
+            "GoPro registration requires the 'zeroconf' package. Install project dependencies before calling opai.register_gopro(...)."
+        ) from exc
+    register_gopro_with_context(
+        ctx, serial_number, download_thumbnails=download_thumbnails
+    )
+
+
+def main() -> None:
+    print(
+        "Use opai.init(name), opai.add_demos(...), opai.add_mapping(...), and opai.calibrate(...) from Python."
     )
     session_names = [session.name for session in catalog.sessions]
     if not catalog.sessions:

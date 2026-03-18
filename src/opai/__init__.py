@@ -11,6 +11,7 @@ from opai.presentation.facade import (
     main,
     plot_video_frames,
     verify_calibrated_parameters,
+    register_gopro,
 )
 
 __all__ = [
@@ -26,4 +27,5 @@ __all__ = [
     "main",
     "plot_video_frames",
     "verify_calibrated_parameters",
+    "register_gopro",
 ]
