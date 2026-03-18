@@ -14,6 +14,7 @@ from opai.core.exceptions import (
     OPAIContextError,
     OPAIDependencyError,
     OPAIValidationError,
+    OPAIWorkflowError,
 )
 from opai.infrastructure import context_store
 
@@ -21,6 +22,15 @@ from opai.infrastructure import context_store
 def test_calibrate_requires_context() -> None:
     with pytest.raises(OPAIContextError, match="Call opai.init"):
         opai.calibrate([], 3, 3, 1.0, 0.5, "DICT_4X4_50")
+
+
+def test_calibrate_with_video_requires_context(tmp_path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    video_path = tmp_path / "demo.mp4"
+    video_path.write_bytes(b"demo")
+
+    with pytest.raises(OPAIContextError, match="Call opai.init"):
+        opai.calibrate_with_video(video_path, 2, 3, 3, 1.0, 0.5, "DICT_4X4_50")
 
 
 def test_init_creates_context_directory(tmp_path, monkeypatch) -> None:
@@ -95,6 +105,140 @@ def test_calibrate_writes_artifact(tmp_path, monkeypatch) -> None:
     assert payload["image_height"] == 10
     assert payload["image_width"] == 12
     assert result.intrinsic_type == "FISHEYE"
+
+
+def test_calibrate_with_video_writes_artifact_without_plotting(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    fake_cv2 = _build_fake_cv2()
+    monkeypatch.setattr(calibration_module, "cv2", fake_cv2)
+    monkeypatch.chdir(tmp_path)
+    opai.init("session-001")
+
+    frames = tuple(
+        np.full((10, 12, 3), fill_value=index, dtype=np.uint8) for index in range(5)
+    )
+    video_path = tmp_path / "demo.mp4"
+    video_path.write_bytes(b"demo")
+    monkeypatch.setattr(
+        calibration_module,
+        "sample_video_frames",
+        lambda **kwargs: frames,
+    )
+
+    def fail_matplotlib_import(name, globals=None, locals=None, fromlist=(), level=0):
+        if name == "matplotlib.pyplot":
+            pytest.fail("calibrate_with_video should not import matplotlib")
+        return builtin_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr("builtins.__import__", fail_matplotlib_import)
+
+    result = opai.calibrate_with_video(
+        video_path=video_path,
+        frame_sample_step=2,
+        row_count=3,
+        col_count=3,
+        square_length=1.0,
+        marker_length=0.5,
+        dictionary="DICT_4X4_50",
+    )
+
+    output_path = tmp_path / ".opai_sessions" / "session-001" / "calibration.json"
+    assert output_path.exists()
+    payload = json.loads(output_path.read_text(encoding="utf-8"))
+    assert payload["image_height"] == 10
+    assert payload["image_width"] == 12
+    assert result.intrinsic_type == "FISHEYE"
+
+
+def test_plot_video_frames_uses_auto_grid_defaults_without_context(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    frames = tuple(
+        np.full((10, 12, 3), fill_value=index, dtype=np.uint8) for index in range(5)
+    )
+    video_path = tmp_path / "demo.mp4"
+    video_path.write_bytes(b"demo")
+    monkeypatch.setattr(context_store, "_ACTIVE_CONTEXT", None)
+    monkeypatch.setattr(
+        calibration_module,
+        "sample_video_frames",
+        lambda **kwargs: frames,
+    )
+    pyplot = _build_fake_pyplot(nrows=2, ncols=3)
+    monkeypatch.setitem(sys.modules, "matplotlib", SimpleNamespace(pyplot=pyplot))
+    monkeypatch.setitem(sys.modules, "matplotlib.pyplot", pyplot)
+
+    opai.plot_video_frames(video_path, frame_sample_step=2)
+
+    assert pyplot.subplots_calls == [((2, 3), {"figsize": (12, 6)})]
+    assert pyplot.show_count == 1
+    assert pyplot.figure.tight_layout_calls == 1
+    assert np.array_equal(
+        pyplot.axes[0].images[0],
+        frames[0][:, :, ::-1],
+    )
+    assert all(axis.axis_off_calls == 1 for axis in pyplot.axes[:5])
+    assert pyplot.axes[5].axis_off_calls == 1
+
+
+def test_plot_video_frames_accepts_custom_grid(tmp_path, monkeypatch) -> None:
+    frames = tuple(
+        np.full((10, 12, 3), fill_value=index, dtype=np.uint8) for index in range(5)
+    )
+    video_path = tmp_path / "demo.mp4"
+    video_path.write_bytes(b"demo")
+    monkeypatch.setattr(
+        calibration_module,
+        "sample_video_frames",
+        lambda **kwargs: frames,
+    )
+    pyplot = _build_fake_pyplot(nrows=1, ncols=5)
+    monkeypatch.setitem(sys.modules, "matplotlib", SimpleNamespace(pyplot=pyplot))
+    monkeypatch.setitem(sys.modules, "matplotlib.pyplot", pyplot)
+
+    opai.plot_video_frames(video_path, frame_sample_step=2, nrows=1, ncols=5)
+
+    assert pyplot.subplots_calls == [((1, 5), {"figsize": (20, 3)})]
+    assert pyplot.show_count == 1
+    assert all(axis.axis_off_calls == 1 for axis in pyplot.axes)
+
+
+def test_plot_video_frames_requires_matplotlib(tmp_path, monkeypatch) -> None:
+    video_path = tmp_path / "demo.mp4"
+    video_path.write_bytes(b"demo")
+    monkeypatch.setattr(
+        calibration_module,
+        "sample_video_frames",
+        lambda **kwargs: (np.zeros((4, 4, 3), dtype=np.uint8),),
+    )
+
+    def fake_import(name, globals=None, locals=None, fromlist=(), level=0):
+        if name == "matplotlib.pyplot":
+            raise ModuleNotFoundError("No module named 'matplotlib'")
+        return builtin_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr("builtins.__import__", fake_import)
+
+    with pytest.raises(OPAIDependencyError, match="matplotlib"):
+        opai.plot_video_frames(video_path, frame_sample_step=2)
+
+
+def test_plot_video_frames_propagates_sampling_failure(tmp_path, monkeypatch) -> None:
+    video_path = tmp_path / "demo.mp4"
+    video_path.write_bytes(b"demo")
+    monkeypatch.setattr(
+        calibration_module,
+        "sample_video_frames",
+        lambda **kwargs: (_ for _ in ()).throw(
+            OPAIWorkflowError("Calibration failed: video sampling produced no frames.")
+        ),
+    )
+
+    with pytest.raises(OPAIWorkflowError, match="produced no frames"):
+        opai.plot_video_frames(video_path, frame_sample_step=2)
 
 
 def test_add_demos_requires_context(tmp_path, monkeypatch) -> None:
@@ -249,6 +393,16 @@ def test_browse_session_requires_rich(tmp_path, monkeypatch) -> None:
 
 
 def _build_fake_cv2() -> SimpleNamespace:
+    def fake_calibrate_camera_charuco(**kwargs):
+        frame_count = len(kwargs["charucoCorners"])
+        return (
+            0.1,
+            np.array([[10.0, 0.0, 5.0], [0.0, 20.0, 6.0], [0.0, 0.0, 1.0]]),
+            np.array([0.1, 0.2, 0.3, 0.4]),
+            [np.zeros((3, 1), dtype=np.float32) for _ in range(frame_count)],
+            [np.zeros((3, 1), dtype=np.float32) for _ in range(frame_count)],
+        )
+
     board = SimpleNamespace(
         getChessboardCorners=lambda: np.array(
             [
@@ -283,13 +437,7 @@ def _build_fake_cv2() -> SimpleNamespace:
             ),
             np.array([[0], [1], [2], [3]], dtype=np.int32),
         ),
-        calibrateCameraCharuco=lambda **kwargs: (
-            0.1,
-            np.array([[10.0, 0.0, 5.0], [0.0, 20.0, 6.0], [0.0, 0.0, 1.0]]),
-            np.array([0.1, 0.2, 0.3, 0.4]),
-            [np.zeros((3, 1), dtype=np.float32)],
-            [np.zeros((3, 1), dtype=np.float32)],
-        ),
+        calibrateCameraCharuco=fake_calibrate_camera_charuco,
     )
 
     return SimpleNamespace(
@@ -327,3 +475,41 @@ def _install_fake_rich(
     )
     monkeypatch.setitem(sys.modules, "rich.tree", SimpleNamespace(Tree=FakeTree))
     return recorder
+
+
+def _build_fake_pyplot(*, nrows: int, ncols: int):
+    class FakeAxis:
+        def __init__(self) -> None:
+            self.images: list[np.ndarray] = []
+            self.axis_off_calls = 0
+
+        def imshow(self, image: np.ndarray) -> None:
+            self.images.append(image)
+
+        def set_axis_off(self) -> None:
+            self.axis_off_calls += 1
+
+    class FakeFigure:
+        def __init__(self) -> None:
+            self.tight_layout_calls = 0
+
+        def tight_layout(self) -> None:
+            self.tight_layout_calls += 1
+
+    class FakePyplot:
+        def __init__(self) -> None:
+            self.figure = FakeFigure()
+            self.axes = [FakeAxis() for _ in range(nrows * ncols)]
+            self.subplots_calls: list[
+                tuple[tuple[int, int], dict[str, tuple[int, int]]]
+            ] = []
+            self.show_count = 0
+
+        def subplots(self, rows: int, cols: int, **kwargs):
+            self.subplots_calls.append(((rows, cols), kwargs))
+            return self.figure, np.array(self.axes, dtype=object).reshape(rows, cols)
+
+        def show(self) -> None:
+            self.show_count += 1
+
+    return FakePyplot()

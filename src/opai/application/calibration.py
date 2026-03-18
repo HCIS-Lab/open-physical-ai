@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from pathlib import Path
 
 import cv2
 import numpy as np
@@ -9,6 +10,9 @@ from opai.core.exceptions import OPAIValidationError, OPAIWorkflowError
 from opai.domain.calibration import CalibrationIntrinsics, CalibrationResult
 from opai.domain.context import Context
 from opai.infrastructure.persistence import write_calibration_result
+from opai.infrastructure.video import (
+    sample_video_frames as sample_video_frames_from_path,
+)
 
 
 def calibrate(
@@ -98,6 +102,39 @@ def calibrate(
     )
     write_calibration_result(ctx.session_directory, result)
     return result
+
+
+def sample_video_frames(
+    video_path: str | Path,
+    frame_sample_step: int,
+) -> tuple[np.ndarray, ...]:
+    path = Path(video_path).expanduser()
+    if not path.exists():
+        raise OPAIValidationError(
+            f"Calibration video does not exist: {path}",
+            details={"path": str(path)},
+        )
+    if not path.is_file():
+        raise OPAIValidationError(
+            f"Calibration video path must point to a file: {path}",
+            details={"path": str(path)},
+        )
+    if frame_sample_step <= 0:
+        raise OPAIValidationError(
+            "frame_sample_step must be greater than 0.",
+            details={"frame_sample_step": frame_sample_step},
+        )
+
+    frames = sample_video_frames_from_path(path, frame_sample_step)
+    if not frames:
+        raise OPAIWorkflowError(
+            "Calibration failed: video sampling produced no frames.",
+            details={
+                "path": str(path),
+                "frame_sample_step": frame_sample_step,
+            },
+        )
+    return frames
 
 
 def _validate_inputs(

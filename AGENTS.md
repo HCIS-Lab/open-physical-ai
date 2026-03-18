@@ -144,6 +144,7 @@ Outcome:
 - Make artifact creation deterministic where possible.
 - Make errors notebook-friendly and actionable.
 - Fail fast on required dependencies. If a feature depends on a package that is required by this repo, import it normally and let missing dependencies fail at import time rather than adding deferred runtime guards. Reserve lazy imports or fallback guards for truly optional integrations only.
+- In `src/opai/presentation/facade.py`, prefer comprehensive public-function implementations over underscore-prefixed helper members. Keep the facade logic visible in the public functions rather than hiding it behind private abstractions unless the file would otherwise become unworkable.
 - Do not import types from the `typing` module. Python 3.10+ native annotations are the repo standard.
 - Prefer built-in generics such as `list[str]`, `dict[str, object]`, `tuple[int, ...]`, and unions like `Path | None`.
 - When a protocol-style annotation is needed, import it from `collections.abc` instead of `typing`.

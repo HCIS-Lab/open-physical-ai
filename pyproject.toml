@@ -9,6 +9,8 @@ authors = [
 requires-python = ">=3.10"
 dependencies = [
     "jupyterlab>=4.5.6",
+    "matplotlib>=3.10.7",
+    "numpy>=2.2.6",
     "opencv-contrib-python>=4.13.0.92",
     "rich>=14.1.0",
 ]
