@@ -223,3 +223,6 @@ video/demos/*
 datasets/*
 checkpoints/*
 demos/*
+
+
+workspace/*

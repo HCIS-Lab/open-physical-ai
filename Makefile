@@ -15,6 +15,9 @@ run-isort:
 run-formatter:
 	uv run --extra dev ruff format src tests
 
+launch-jupyterlab:
+	uv run jupyter lab --notebook-dir=workspace --ip=0.0.0.0 --no-browser
+
 clean:
 	rm -rf .pytest_cache .ruff_cache .venv build dist src/*.egg-info
 	find . -type d -name "__pycache__" -prune -exec rm -rf {} +
