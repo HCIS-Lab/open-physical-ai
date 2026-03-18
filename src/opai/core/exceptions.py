@@ -49,3 +49,15 @@ class OPAIWorkflowError(OPAIError, RuntimeError):
     """Raised when a workflow fails after input validation."""
 
     default_error_code = "workflow_error"
+
+
+class OPAIGoProRegistrationError(OPAIError, RuntimeError):
+    """Raised when a workflow fails after input validation."""
+
+    default_error_code = "gopro_registration_error"
+
+
+class OPAIGoProNotConnectedError(OPAIError, RuntimeError):
+    """Raised when a workflow fails after input validation."""
+
+    default_error_code = "gopro_not_connected_error"

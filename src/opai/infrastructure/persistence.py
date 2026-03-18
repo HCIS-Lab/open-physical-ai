@@ -6,6 +6,7 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from opai.domain.calibration import CalibrationResult
+from opai.domain.gopro import GPThumbnail, GPThumbnailIndex
 from opai.domain.session import DemoAsset, MappingAsset, SessionManifest
 
 
@@ -89,6 +90,40 @@ def write_session_manifest(manifest_path: Path, manifest: SessionManifest) -> Pa
 
     manifest_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     return manifest_path
+
+
+def load_gopro_thumbnail_index(index_path: Path) -> GPThumbnailIndex:
+    if not index_path.exists():
+        return GPThumbnailIndex(items=[])
+
+    payload = json.loads(index_path.read_text(encoding="utf-8"))
+    return GPThumbnailIndex(
+        items=[
+            GPThumbnail(
+                media_path=entry["media_path"],
+                source_directory=entry["source_directory"],
+                source_filename=entry["source_filename"],
+                thumbnail_path=entry["thumbnail_path"],
+            )
+            for entry in payload.get("items", [])
+        ]
+    )
+
+
+def write_gopro_thumbnail_index(index_path: Path, index: GPThumbnailIndex) -> Path:
+    payload = {
+        "items": [
+            {
+                "media_path": item.media_path,
+                "source_directory": item.source_directory,
+                "source_filename": item.source_filename,
+                "thumbnail_path": item.thumbnail_path,
+            }
+            for item in index.items
+        ]
+    }
+    index_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    return index_path
 
 
 def copy_demo_assets(

@@ -1,4 +1,4 @@
-.PHONY: install-uv install run-unit-test run-isort run-formatter clean
+.PHONY: install-uv install run-unit-test run-isort run-formatter launch-jupyterlab clean
 
 install-uv:
 	curl -LsSf https://astral.sh/uv/install.sh | sh
@@ -14,6 +14,10 @@ run-isort:
 
 run-formatter:
 	uv run --extra dev ruff format src tests
+
+launch-jupyterlab:
+	mkdir -p workspace
+	uv run jupyter lab --notebook-dir=workspace --ip=0.0.0.0 --no-browser
 
 clean:
 	rm -rf .pytest_cache .ruff_cache .venv build dist src/*.egg-info
