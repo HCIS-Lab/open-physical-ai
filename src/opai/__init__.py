@@ -7,6 +7,7 @@ from opai.presentation.facade import (
     init,
     list_sessions,
     main,
+    register_gopro,
 )
 
 __all__ = [
@@ -18,4 +19,5 @@ __all__ = [
     "init",
     "list_sessions",
     "main",
+    "register_gopro",
 ]
