@@ -7,15 +7,15 @@ import pytest
 
 from opai.application import calibration as calibration_module
 from opai.application.calibration import (
+    _build_fisheye_calibration_points,
     _build_intrinsics,
     _compute_mse_reprojection_error,
-    _resolve_dictionary,
     calibrate,
     sample_video_frames,
 )
 from opai.core.exceptions import OPAIValidationError, OPAIWorkflowError
 from opai.domain.context import Context
-from opai.domain.grid import get_plot_grid
+from opai.domain.plot import get_plot_grid
 from opai.infrastructure import video as video_module
 
 
@@ -34,7 +34,24 @@ def fake_cv2(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
             DICT_4X4_50=1,
             getPredefinedDictionary=lambda dictionary_id: {"id": dictionary_id},
         ),
-        projectPoints=lambda **kwargs: (kwargs["objectPoints"][:, :, :2], None),
+        fisheye=SimpleNamespace(
+            CALIB_RECOMPUTE_EXTRINSIC=1,
+            CALIB_CHECK_COND=2,
+            CALIB_FIX_SKEW=4,
+            calibrate=lambda *args, **kwargs: (
+                0.1,
+                np.eye(3),
+                np.zeros((4, 1)),
+                (),
+                (),
+            ),
+            projectPoints=lambda object_points, *_args: (
+                object_points[:, :, :2],
+                None,
+            ),
+        ),
+        TERM_CRITERIA_EPS=1,
+        TERM_CRITERIA_MAX_ITER=2,
         COLOR_BGR2GRAY=1,
         cvtColor=lambda frame, _: frame[:, :, 0],
     )
@@ -42,9 +59,15 @@ def fake_cv2(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     return fake
 
 
-def test_resolve_dictionary_rejects_unknown_name(fake_cv2: SimpleNamespace) -> None:
+def test_calibrate_rejects_unknown_dictionary(
+    tmp_path,
+    fake_cv2: SimpleNamespace,
+) -> None:
+    ctx = Context(name="session", session_directory=tmp_path)
+    frame = np.zeros((10, 10, 3), dtype=np.uint8)
+
     with pytest.raises(OPAIValidationError, match="Unsupported ArUco dictionary"):
-        _resolve_dictionary("DICT_DOES_NOT_EXIST")
+        calibrate(ctx, [frame], 3, 3, 1.0, 0.5, "DICT_DOES_NOT_EXIST")
 
 
 def test_calibrate_rejects_invalid_frames(tmp_path, fake_cv2: SimpleNamespace) -> None:
@@ -54,6 +77,56 @@ def test_calibrate_rejects_invalid_frames(tmp_path, fake_cv2: SimpleNamespace) -
 
     with pytest.raises(OPAIValidationError, match="identical image dimensions"):
         calibrate(ctx, [frame_a, frame_b], 3, 3, 1.0, 0.5, "DICT_4X4_50")
+
+
+def test_build_fisheye_calibration_points_maps_ids_to_board_coordinates() -> None:
+    board = DummyBoard(
+        np.array(
+            [
+                [0.0, 0.0, 0.0],
+                [1.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0],
+            ],
+            dtype=np.float32,
+        )
+    )
+    charuco_corners = [
+        np.array(
+            [
+                [[10.0, 20.0]],
+                [[30.0, 40.0]],
+            ],
+            dtype=np.float32,
+        )
+    ]
+    charuco_ids = [np.array([[2], [0]], dtype=np.int32)]
+
+    object_points, image_points = _build_fisheye_calibration_points(
+        board=board,
+        charuco_corners=charuco_corners,
+        charuco_ids=charuco_ids,
+    )
+
+    assert np.array_equal(
+        object_points[0],
+        np.array(
+            [
+                [[0.0, 1.0, 0.0]],
+                [[0.0, 0.0, 0.0]],
+            ],
+            dtype=np.float64,
+        ),
+    )
+    assert np.array_equal(
+        image_points[0],
+        np.array(
+            [
+                [[10.0, 20.0]],
+                [[30.0, 40.0]],
+            ],
+            dtype=np.float64,
+        ),
+    )
 
 
 def test_build_intrinsics_zero_fills_missing_distortion() -> None:
@@ -83,13 +156,19 @@ def test_compute_mse_reprojection_error_averages_squared_pixel_error(
     observed_corners = [np.array([[[1.0, 1.0]], [[4.0, 4.0]]], dtype=np.float32)]
     observed_ids = [np.array([[0], [1]], dtype=np.int32)]
 
-    def fake_project_points(**_: np.ndarray) -> tuple[np.ndarray, None]:
+    def fake_project_points(
+        object_points: np.ndarray,
+        _rvec: np.ndarray,
+        _tvec: np.ndarray,
+        _camera_matrix: np.ndarray,
+        _dist_coeffs: np.ndarray,
+    ) -> tuple[np.ndarray, None]:
         return np.array([[[2.0, 3.0]], [[5.0, 6.0]]], dtype=np.float32), None
 
     monkeypatch.setattr(
         calibration_module,
         "cv2",
-        SimpleNamespace(projectPoints=fake_project_points),
+        SimpleNamespace(fisheye=SimpleNamespace(projectPoints=fake_project_points)),
     )
 
     mse = _compute_mse_reprojection_error(

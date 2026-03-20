@@ -6,10 +6,25 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from opai.core.exceptions import OPAIValidationError, OPAIWorkflowError
-from opai.domain.calibration import CalibrationIntrinsics, CalibrationResult
+from opai.core.exceptions import (
+    OPAIDependencyError,
+    OPAIValidationError,
+    OPAIWorkflowError,
+)
+from opai.domain.calibration import (
+    CalibrationIntrinsics,
+    CalibrationResult,
+    CharucoBoardArtifacts,
+    CharucoBoardConfig,
+    validate_charuco_board_config,
+)
 from opai.domain.context import Context
-from opai.infrastructure.persistence import write_calibration_result
+from opai.domain.plot import plot_frames
+from opai.infrastructure.persistence import (
+    write_calibration_result,
+    write_charuco_board_config,
+    write_charuco_board_image,
+)
 from opai.infrastructure.video import (
     sample_video_frames as sample_video_frames_from_path,
 )
@@ -23,6 +38,9 @@ def calibrate(
     square_length: float,
     marker_length: float,
     dictionary: str,
+    nrows: int | None = None,
+    ncols: int | None = None,
+    plot_result: bool = False,
 ) -> CalibrationResult:
     _validate_inputs(
         frames=frames,
@@ -32,37 +50,46 @@ def calibrate(
         marker_length=marker_length,
     )
 
-    aruco_dictionary = _resolve_dictionary(dictionary)
+    dictionary_id = getattr(cv2.aruco, dictionary, None)
+    if dictionary_id is None:
+        raise OPAIValidationError(f"Unsupported ArUco dictionary: {dictionary}")
+    aruco_dictionary = cv2.aruco.getPredefinedDictionary(dictionary_id)
     board = cv2.aruco.CharucoBoard(
-        (col_count, row_count),
-        square_length,
-        marker_length,
-        aruco_dictionary,
+        (col_count, row_count), square_length, marker_length, aruco_dictionary
     )
+    charuco_detector = cv2.aruco.CharucoDetector(board)
 
-    image_height, image_width = _get_frame_size(frames)
+    image_height, image_width = (int(value) for value in frames[0].shape[:2])
     image_size = (image_width, image_height)
 
     all_charuco_corners: list[np.ndarray] = []
     all_charuco_ids: list[np.ndarray] = []
+    detected_corner_frames: list[np.ndarray] = []
 
     for frame in frames:
-        grayscale = _to_grayscale(frame)
-        corners, ids, _ = cv2.aruco.detectMarkers(grayscale, aruco_dictionary)
-        if ids is None or len(ids) == 0:
+        grayscale = (
+            frame if frame.ndim == 2 else cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        )
+        cv2.waitKey(0)
+        charuco_corners, charuco_ids, _, _ = charuco_detector.detectBoard(grayscale)
+
+        if charuco_ids is None or charuco_corners is None:
             continue
 
-        _, charuco_corners, charuco_ids = cv2.aruco.interpolateCornersCharuco(
-            markerCorners=corners,
-            markerIds=ids,
-            image=grayscale,
-            board=board,
-        )
-        if charuco_ids is None or charuco_corners is None or len(charuco_ids) < 4:
+        if int(charuco_ids.size) < 4:
             continue
 
         all_charuco_corners.append(charuco_corners)
         all_charuco_ids.append(charuco_ids)
+        plotted_frame = frame.copy()
+        if plotted_frame.ndim == 2:
+            plotted_frame = cv2.cvtColor(plotted_frame, cv2.COLOR_GRAY2BGR)
+        cv2.aruco.drawDetectedCornersCharuco(
+            image=plotted_frame,
+            charucoCorners=charuco_corners,
+            charucoIds=charuco_ids,
+        )
+        detected_corner_frames.append(plotted_frame)
 
     if not all_charuco_corners:
         raise OPAIWorkflowError(
@@ -70,13 +97,32 @@ def calibrate(
             "Verify the board parameters and frame content."
         )
 
-    ret, camera_matrix, dist_coeffs, rvecs, tvecs = cv2.aruco.calibrateCameraCharuco(
-        charucoCorners=all_charuco_corners,
-        charucoIds=all_charuco_ids,
+    if plot_result:
+        try:
+            plot_frames(
+                detected_corner_frames,
+                nrows=nrows,
+                ncols=ncols,
+                frames_are_bgr=True,
+            )
+        except ModuleNotFoundError as exc:
+            raise OPAIDependencyError(
+                "Calibration plotting requires the 'matplotlib' package. Install "
+                "project dependencies before calling opai.calibrate(...) or "
+                "opai.calibrate_with_video(...)."
+            ) from exc
+        except ValueError as exc:
+            raise OPAIValidationError(str(exc)) from exc
+
+    object_points, image_points = _build_fisheye_calibration_points(
         board=board,
-        imageSize=image_size,
-        cameraMatrix=None,
-        distCoeffs=None,
+        charuco_corners=all_charuco_corners,
+        charuco_ids=all_charuco_ids,
+    )
+    ret, camera_matrix, dist_coeffs, rvecs, tvecs = _calibrate_fisheye(
+        object_points=object_points,
+        image_points=image_points,
+        image_size=image_size,
     )
 
     mse_reproj_error = _compute_mse_reprojection_error(
@@ -102,6 +148,52 @@ def calibrate(
     )
     write_calibration_result(ctx.session_directory, result)
     return result
+
+
+def generate_charuco_board(
+    ctx: Context,
+    config: CharucoBoardConfig,
+) -> CharucoBoardArtifacts:
+    validate_charuco_board_config(config)
+    normalized_config = CharucoBoardConfig(
+        dictionary=config.dictionary.strip(),
+        squares_x=config.squares_x,
+        squares_y=config.squares_y,
+        square_length=config.square_length,
+        marker_length=config.marker_length,
+        image_width_px=config.image_width_px,
+        image_height_px=config.image_height_px,
+        margin_size_px=config.margin_size_px,
+    )
+
+    dictionary_id = getattr(cv2.aruco, normalized_config.dictionary, None)
+    if dictionary_id is None:
+        raise OPAIValidationError(
+            f"Unsupported ArUco dictionary: {normalized_config.dictionary}"
+        )
+    aruco_dictionary = cv2.aruco.getPredefinedDictionary(dictionary_id)
+    board = cv2.aruco.CharucoBoard(
+        (normalized_config.squares_x, normalized_config.squares_y),
+        normalized_config.square_length,
+        normalized_config.marker_length,
+        aruco_dictionary,
+    )
+    board_image = board.generateImage(
+        (normalized_config.image_width_px, normalized_config.image_height_px),
+        marginSize=normalized_config.margin_size_px,
+    )
+
+    image_path = write_charuco_board_image(ctx.session_directory, board_image)
+    config_path = write_charuco_board_config(
+        ctx.session_directory,
+        normalized_config,
+        board_image_path=image_path.name,
+    )
+    return CharucoBoardArtifacts(
+        image_path=image_path,
+        config_path=config_path,
+        config=normalized_config,
+    )
 
 
 def sample_video_frames(
@@ -163,22 +255,67 @@ def _validate_inputs(
             )
 
 
-def _resolve_dictionary(name: str) -> cv2.aruco.Dictionary:
-    dictionary_id = getattr(cv2.aruco, name, None)
-    if dictionary_id is None:
-        raise OPAIValidationError(f"Unsupported ArUco dictionary: {name}")
-    return cv2.aruco.getPredefinedDictionary(dictionary_id)
+def _build_fisheye_calibration_points(
+    board: cv2.aruco.CharucoBoard,
+    charuco_corners: Sequence[np.ndarray],
+    charuco_ids: Sequence[np.ndarray],
+) -> tuple[tuple[np.ndarray, ...], tuple[np.ndarray, ...]]:
+    if len(charuco_corners) != len(charuco_ids):
+        raise OPAIWorkflowError(
+            "Calibration failed: inconsistent ChArUco observation lengths."
+        )
+
+    chessboard_corners = np.asarray(board.getChessboardCorners(), dtype=np.float64)
+    object_points: list[np.ndarray] = []
+    image_points: list[np.ndarray] = []
+
+    for observed_corners, observed_ids in zip(charuco_corners, charuco_ids):
+        object_points.append(
+            chessboard_corners[observed_ids.flatten()].reshape(-1, 1, 3)
+        )
+        image_points.append(
+            np.asarray(observed_corners, dtype=np.float64).reshape(-1, 1, 2)
+        )
+
+    if not object_points:
+        raise OPAIWorkflowError(
+            "Calibration failed: no ChArUco observations available for fisheye calibration."
+        )
+
+    return tuple(object_points), tuple(image_points)
 
 
-def _get_frame_size(frames: Sequence[np.ndarray]) -> tuple[int, int]:
-    height, width = frames[0].shape[:2]
-    return int(height), int(width)
-
-
-def _to_grayscale(frame: np.ndarray) -> np.ndarray:
-    if frame.ndim == 2:
-        return frame
-    return cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+def _calibrate_fisheye(
+    object_points: Sequence[np.ndarray],
+    image_points: Sequence[np.ndarray],
+    image_size: tuple[int, int],
+) -> tuple[
+    float, np.ndarray, np.ndarray, tuple[np.ndarray, ...], tuple[np.ndarray, ...]
+]:
+    ret, camera_matrix, dist_coeffs, rvecs, tvecs = cv2.fisheye.calibrate(
+        object_points,
+        image_points,
+        image_size,
+        np.eye(3, dtype=np.float64),
+        np.zeros((4, 1), dtype=np.float64),
+        flags=(
+            cv2.fisheye.CALIB_RECOMPUTE_EXTRINSIC
+            | cv2.fisheye.CALIB_CHECK_COND
+            | cv2.fisheye.CALIB_FIX_SKEW
+        ),
+        criteria=(
+            cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER,
+            100,
+            1e-6,
+        ),
+    )
+    return (
+        float(ret),
+        np.asarray(camera_matrix, dtype=np.float64),
+        np.asarray(dist_coeffs, dtype=np.float64),
+        tuple(rvecs),
+        tuple(tvecs),
+    )
 
 
 def _compute_mse_reprojection_error(
@@ -206,12 +343,12 @@ def _compute_mse_reprojection_error(
         tvecs,
     ):
         object_points = chessboard_corners[observed_ids.flatten()].reshape(-1, 1, 3)
-        projected_corners, _ = cv2.projectPoints(
-            objectPoints=object_points,
-            rvec=rvec,
-            tvec=tvec,
-            cameraMatrix=camera_matrix,
-            distCoeffs=dist_coeffs,
+        projected_corners, _ = cv2.fisheye.projectPoints(
+            object_points,
+            rvec,
+            tvec,
+            camera_matrix,
+            dist_coeffs,
         )
         deltas = projected_corners.reshape(-1, 2) - observed_corners.reshape(-1, 2)
         squared_error_sum += float(np.sum(deltas * deltas))

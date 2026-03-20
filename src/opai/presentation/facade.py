@@ -11,9 +11,21 @@ from opai.core.exceptions import (
     OPAIDependencyError,
     OPAIValidationError,
 )
-from opai.domain.calibration import CalibrationResult
+from opai.domain.calibration import (
+    DEFAULT_CHARUCO_DICTIONARY,
+    DEFAULT_CHARUCO_IMAGE_HEIGHT_PX,
+    DEFAULT_CHARUCO_IMAGE_WIDTH_PX,
+    DEFAULT_CHARUCO_MARGIN_SIZE_PX,
+    DEFAULT_CHARUCO_MARKER_LENGTH,
+    DEFAULT_CHARUCO_SQUARE_LENGTH,
+    DEFAULT_CHARUCO_SQUARES_X,
+    DEFAULT_CHARUCO_SQUARES_Y,
+    CalibrationResult,
+    CharucoBoardArtifacts,
+    CharucoBoardConfig,
+)
 from opai.domain.context import Context
-from opai.domain.grid import get_plot_grid
+from opai.domain.plot import plot_frames
 from opai.domain.session import DemoAsset, MappingAsset
 from opai.infrastructure.context_store import get_active_context, init_context
 
@@ -48,6 +60,9 @@ def calibrate(
     square_length: float,
     marker_length: float,
     dictionary: str,
+    nrows: int | None = None,
+    ncols: int | None = None,
+    plot_result: bool = False,
 ) -> CalibrationResult:
     ctx = get_context()
     try:
@@ -66,7 +81,44 @@ def calibrate(
         square_length=square_length,
         marker_length=marker_length,
         dictionary=dictionary,
+        nrows=nrows,
+        ncols=ncols,
+        plot_result=plot_result,
     )
+
+
+def generate_charuco_board(
+    dictionary: str = DEFAULT_CHARUCO_DICTIONARY,
+    squares_x: int = DEFAULT_CHARUCO_SQUARES_X,
+    squares_y: int = DEFAULT_CHARUCO_SQUARES_Y,
+    square_length: float = DEFAULT_CHARUCO_SQUARE_LENGTH,
+    marker_length: float = DEFAULT_CHARUCO_MARKER_LENGTH,
+    image_width_px: int = DEFAULT_CHARUCO_IMAGE_WIDTH_PX,
+    image_height_px: int = DEFAULT_CHARUCO_IMAGE_HEIGHT_PX,
+    margin_size_px: int = DEFAULT_CHARUCO_MARGIN_SIZE_PX,
+) -> CharucoBoardArtifacts:
+    ctx = get_context()
+    try:
+        from opai.application.calibration import (
+            generate_charuco_board as generate_charuco_board_with_context,
+        )
+    except ModuleNotFoundError as exc:
+        raise OPAIDependencyError(
+            "ChArUco board generation dependencies are unavailable. Install the project's "
+            "OpenCV stack before calling opai.generate_charuco_board(...)."
+        ) from exc
+
+    config = CharucoBoardConfig(
+        dictionary=dictionary,
+        squares_x=squares_x,
+        squares_y=squares_y,
+        square_length=square_length,
+        marker_length=marker_length,
+        image_width_px=image_width_px,
+        image_height_px=image_height_px,
+        margin_size_px=margin_size_px,
+    )
+    return generate_charuco_board_with_context(ctx=ctx, config=config)
 
 
 def calibrate_with_video(
@@ -77,6 +129,9 @@ def calibrate_with_video(
     square_length: float,
     marker_length: float,
     dictionary: str,
+    nrows: int | None = None,
+    ncols: int | None = None,
+    plot_result: bool = False,
 ) -> CalibrationResult:
     ctx = get_context()
     try:
@@ -104,6 +159,9 @@ def calibrate_with_video(
         square_length=square_length,
         marker_length=marker_length,
         dictionary=dictionary,
+        nrows=nrows,
+        ncols=ncols,
+        plot_result=plot_result,
     )
 
 
@@ -128,37 +186,19 @@ def plot_video_frames(
         frame_sample_step=frame_sample_step,
     )
     try:
-        import matplotlib.pyplot as pyplot
+        plot_frames(
+            frames,
+            nrows=nrows,
+            ncols=ncols,
+            frames_are_bgr=True,
+        )
     except ModuleNotFoundError as exc:
         raise OPAIDependencyError(
             "Frame plotting requires the 'matplotlib' package. Install project "
             "dependencies before calling opai.plot_video_frames(...)."
         ) from exc
-
-    try:
-        grid = get_plot_grid(len(frames), nrows=nrows, ncols=ncols)
     except ValueError as exc:
         raise OPAIValidationError(str(exc)) from exc
-
-    fig, axes = pyplot.subplots(
-        grid.nrows,
-        grid.ncols,
-        figsize=(4 * grid.ncols, 3 * grid.nrows),
-    )
-    flat_axes = np.atleast_1d(axes).reshape(-1)
-
-    for axis, frame in zip(flat_axes, frames):
-        if frame.ndim == 2:
-            axis.imshow(frame)
-        else:
-            axis.imshow(frame[:, :, ::-1])
-        axis.set_axis_off()
-
-    for axis in flat_axes[len(frames) :]:
-        axis.set_axis_off()
-
-    fig.tight_layout()
-    pyplot.show()
 
 
 def add_demos(video_paths: Sequence[str | Path]) -> tuple[DemoAsset, ...]:
@@ -266,6 +306,6 @@ def browse_session(name: str) -> list[str]:
 def main() -> None:
     print(
         "Use opai.init(name), opai.add_demos(...), opai.add_mapping(...), "
-        "opai.calibrate(...), opai.calibrate_with_video(...), and "
-        "opai.plot_video_frames(...) from Python."
+        "opai.generate_charuco_board(...), opai.calibrate(...), "
+        "opai.calibrate_with_video(...), and opai.plot_video_frames(...) from Python."
     )

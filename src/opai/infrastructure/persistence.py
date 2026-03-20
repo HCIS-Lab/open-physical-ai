@@ -5,7 +5,11 @@ import shutil
 from collections.abc import Sequence
 from pathlib import Path
 
-from opai.domain.calibration import CalibrationResult
+import cv2
+import numpy as np
+
+from opai.core.exceptions import OPAIWorkflowError
+from opai.domain.calibration import CalibrationResult, CharucoBoardConfig
 from opai.domain.session import DemoAsset, MappingAsset, SessionManifest
 
 
@@ -30,6 +34,45 @@ def write_calibration_result(
             "radial_distortion_4": result.intrinsics.radial_distortion_4,
             "skew": result.intrinsics.skew,
         },
+    }
+
+    output_path = session_directory / filename
+    output_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    return output_path
+
+
+def write_charuco_board_image(
+    session_directory: Path,
+    board_image: np.ndarray,
+    filename: str = "charuco_board.png",
+) -> Path:
+    output_path = session_directory / filename
+    wrote_image = cv2.imwrite(str(output_path), board_image)
+    if not wrote_image:
+        raise OPAIWorkflowError(
+            "Failed to write the generated ChArUco board image.",
+            details={"path": str(output_path)},
+        )
+    return output_path
+
+
+def write_charuco_board_config(
+    session_directory: Path,
+    config: CharucoBoardConfig,
+    *,
+    board_image_path: str,
+    filename: str = "charuco_config.json",
+) -> Path:
+    payload = {
+        "dictionary": config.dictionary,
+        "squares_x": config.squares_x,
+        "squares_y": config.squares_y,
+        "square_length": config.square_length,
+        "marker_length": config.marker_length,
+        "image_width_px": config.image_width_px,
+        "image_height_px": config.image_height_px,
+        "margin_size_px": config.margin_size_px,
+        "board_image_path": board_image_path,
     }
 
     output_path = session_directory / filename
