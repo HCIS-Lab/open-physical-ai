@@ -133,12 +133,12 @@ def test_calibrate_accepts_custom_plot_grid(tmp_path, monkeypatch) -> None:
         1.0,
         0.5,
         "DICT_4X4_50",
-        nrows=1,
-        ncols=5,
         plot_result=True,
+        plot_nrows=1,
+        plot_ncols=5,
     )
 
-    assert pyplot.subplots_calls == [((1, 5), {"figsize": (16.0, 2.4000000000000004)})]
+    assert pyplot.subplots_calls == [((1, 5), {"figsize": (16.0, 4.5)})]
 
 
 def test_calibrate_with_video_writes_artifact_without_plotting_by_default(
@@ -176,8 +176,9 @@ def test_calibrate_with_video_writes_artifact_without_plotting_by_default(
         square_length=1.0,
         marker_length=0.5,
         dictionary="DICT_4X4_50",
-        nrows=1,
-        ncols=5,
+        plot_result=False,
+        plot_nrows=1,
+        plot_ncols=5,
     )
 
     output_path = tmp_path / ".opai_sessions" / "session-001" / "calibration.json"
@@ -219,9 +220,9 @@ def test_calibrate_with_video_plots_detected_corners_when_enabled(
         square_length=1.0,
         marker_length=0.5,
         dictionary="DICT_4X4_50",
-        nrows=1,
-        ncols=5,
         plot_result=True,
+        plot_nrows=1,
+        plot_ncols=5,
     )
 
     output_path = tmp_path / ".opai_sessions" / "session-001" / "calibration.json"
@@ -230,7 +231,7 @@ def test_calibrate_with_video_plots_detected_corners_when_enabled(
     assert payload["image_height"] == 10
     assert payload["image_width"] == 12
     assert result.intrinsic_type == "FISHEYE"
-    assert pyplot.subplots_calls == [((1, 5), {"figsize": (16.0, 2.4000000000000004)})]
+    assert pyplot.subplots_calls == [((1, 5), {"figsize": (16.0, 4.5)})]
     assert pyplot.show_count == 1
     assert pyplot.close_calls == [pyplot.figure]
     assert np.array_equal(pyplot.axes[0].images[0], frames[0][..., ::-1])
@@ -328,7 +329,7 @@ def test_plot_video_frames_accepts_custom_grid(tmp_path, monkeypatch) -> None:
     opai.plot_video_frames(video_path, frame_sample_step=2, nrows=1, ncols=5)
 
     assert pyplot.subplots_calls[0][0] == (1, 5)
-    assert pyplot.subplots_calls[0][1]["figsize"] == pytest.approx((16.0, 2.4))
+    assert pyplot.subplots_calls[0][1]["figsize"] == pytest.approx((16.0, 4.5))
     assert pyplot.show_count == 1
     assert pyplot.close_calls == [pyplot.figure]
     assert all(axis.axis_off_calls == 1 for axis in pyplot.axes)
@@ -369,11 +370,11 @@ def test_plot_video_frames_propagates_sampling_failure(tmp_path, monkeypatch) ->
         opai.plot_video_frames(video_path, frame_sample_step=2)
 
 
-def test_plot_video_frames_downsamples_frames_before_plotting(
+def test_plot_video_frames_downsamples_oversized_frames_before_plotting(
     tmp_path,
     monkeypatch,
 ) -> None:
-    frame = np.arange(2000 * 3000 * 3, dtype=np.uint8).reshape(2000, 3000, 3)
+    frame = np.arange(4000 * 6000 * 3, dtype=np.uint8).reshape(4000, 6000, 3)
     video_path = tmp_path / "demo.mp4"
     video_path.write_bytes(b"demo")
     monkeypatch.setattr(
@@ -388,7 +389,7 @@ def test_plot_video_frames_downsamples_frames_before_plotting(
     opai.plot_video_frames(video_path, frame_sample_step=2)
 
     plotted = pyplot.axes[0].images[0]
-    assert plotted.shape == (1000, 1500, 3)
+    assert plotted.shape == (2000, 3000, 3)
     assert np.shares_memory(plotted, frame)
 
 

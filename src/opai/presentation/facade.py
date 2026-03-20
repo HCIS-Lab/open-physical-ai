@@ -60,9 +60,9 @@ def calibrate(
     square_length: float,
     marker_length: float,
     dictionary: str,
-    nrows: int | None = None,
-    ncols: int | None = None,
     plot_result: bool = False,
+    plot_nrows: int | None = None,
+    plot_ncols: int | None = None,
 ) -> CalibrationResult:
     ctx = get_context()
     try:
@@ -81,9 +81,9 @@ def calibrate(
         square_length=square_length,
         marker_length=marker_length,
         dictionary=dictionary,
-        nrows=nrows,
-        ncols=ncols,
         plot_result=plot_result,
+        plot_nrows=plot_nrows,
+        plot_ncols=plot_ncols,
     )
 
 
@@ -129,9 +129,9 @@ def calibrate_with_video(
     square_length: float,
     marker_length: float,
     dictionary: str,
-    nrows: int | None = None,
-    ncols: int | None = None,
     plot_result: bool = False,
+    plot_nrows: int | None = None,
+    plot_ncols: int | None = None,
 ) -> CalibrationResult:
     ctx = get_context()
     try:
@@ -159,9 +159,9 @@ def calibrate_with_video(
         square_length=square_length,
         marker_length=marker_length,
         dictionary=dictionary,
-        nrows=nrows,
-        ncols=ncols,
         plot_result=plot_result,
+        plot_nrows=plot_nrows,
+        plot_ncols=plot_ncols,
     )
 
 

@@ -38,9 +38,9 @@ def calibrate(
     square_length: float,
     marker_length: float,
     dictionary: str,
-    nrows: int | None = None,
-    ncols: int | None = None,
     plot_result: bool = False,
+    plot_nrows: int | None = None,
+    plot_ncols: int | None = None,
 ) -> CalibrationResult:
     _validate_inputs(
         frames=frames,
@@ -70,7 +70,6 @@ def calibrate(
         grayscale = (
             frame if frame.ndim == 2 else cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         )
-        cv2.waitKey(0)
         charuco_corners, charuco_ids, _, _ = charuco_detector.detectBoard(grayscale)
 
         if charuco_ids is None or charuco_corners is None:
@@ -101,8 +100,8 @@ def calibrate(
         try:
             plot_frames(
                 detected_corner_frames,
-                nrows=nrows,
-                ncols=ncols,
+                nrows=plot_nrows,
+                ncols=plot_ncols,
                 frames_are_bgr=True,
             )
         except ModuleNotFoundError as exc:
