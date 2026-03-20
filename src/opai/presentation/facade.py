@@ -21,6 +21,7 @@ from opai.domain.calibration import (
     DEFAULT_CHARUCO_SQUARES_X,
     DEFAULT_CHARUCO_SQUARES_Y,
     CalibrationResult,
+    CalibrationVerificationResult,
     CharucoBoardArtifacts,
     CharucoBoardConfig,
 )
@@ -159,6 +160,32 @@ def calibrate_with_video(
         square_length=square_length,
         marker_length=marker_length,
         dictionary=dictionary,
+        plot_result=plot_result,
+        plot_nrows=plot_nrows,
+        plot_ncols=plot_ncols,
+    )
+
+
+def verify_calibrated_parameters(
+    video_path: str | Path,
+    n_check_imgs: int,
+    charuco_config_json: str | Path | dict[str, object],
+    intrinsics_json: str | Path | dict[str, object],
+    plot_result: bool = False,
+    plot_nrows: int | None = None,
+    plot_ncols: int | None = None,
+) -> CalibrationVerificationResult:
+    ctx = get_context()
+    from opai.application.calibration import (
+        verify_calibrated_parameters as verify_with_context,
+    )
+
+    return verify_with_context(
+        ctx=ctx,
+        video_path=video_path,
+        n_check_imgs=n_check_imgs,
+        charuco_config_json=charuco_config_json,
+        intrinsics_json=intrinsics_json,
         plot_result=plot_result,
         plot_nrows=plot_nrows,
         plot_ncols=plot_ncols,
@@ -307,5 +334,6 @@ def main() -> None:
     print(
         "Use opai.init(name), opai.add_demos(...), opai.add_mapping(...), "
         "opai.generate_charuco_board(...), opai.calibrate(...), "
-        "opai.calibrate_with_video(...), and opai.plot_video_frames(...) from Python."
+        "opai.calibrate_with_video(...), opai.verify_calibrated_parameters(...), "
+        "and opai.plot_video_frames(...) from Python."
     )

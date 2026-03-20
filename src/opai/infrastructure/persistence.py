@@ -9,7 +9,11 @@ import cv2
 import numpy as np
 
 from opai.core.exceptions import OPAIWorkflowError
-from opai.domain.calibration import CalibrationResult, CharucoBoardConfig
+from opai.domain.calibration import (
+    CalibrationResult,
+    CalibrationVerificationResult,
+    CharucoBoardConfig,
+)
 from opai.domain.session import DemoAsset, MappingAsset, SessionManifest
 
 
@@ -38,6 +42,35 @@ def write_calibration_result(
 
     output_path = session_directory / filename
     output_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    print(f"Wrote calibration verification result to {output_path}")
+    return output_path
+
+
+def write_calibration_verification_result(
+    session_directory: Path,
+    result: CalibrationVerificationResult,
+    filename: str = "calibration_verification.json",
+) -> Path:
+    payload = {
+        "requested_check_image_count": result.requested_check_image_count,
+        "sampled_image_count": result.sampled_image_count,
+        "verified_image_count": result.verified_image_count,
+        "skipped_image_count": result.skipped_image_count,
+        "total_detected_corner_count": result.total_detected_corner_count,
+        "mse_reproj_error": result.mse_reproj_error,
+        "frame_results": [
+            {
+                "sampled_frame_index": frame.sampled_frame_index,
+                "detected_corner_count": frame.detected_corner_count,
+                "mse_reproj_error": frame.mse_reproj_error,
+            }
+            for frame in result.frame_results
+        ],
+    }
+
+    output_path = session_directory / filename
+    output_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    print(f"Wrote calibration verification result to {output_path}")
     return output_path
 
 

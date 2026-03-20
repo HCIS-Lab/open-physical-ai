@@ -10,6 +10,7 @@ from opai.presentation.facade import (
     list_sessions,
     main,
     plot_video_frames,
+    verify_calibrated_parameters,
 )
 
 __all__ = [
@@ -24,4 +25,5 @@ __all__ = [
     "list_sessions",
     "main",
     "plot_video_frames",
+    "verify_calibrated_parameters",
 ]

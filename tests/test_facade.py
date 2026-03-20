@@ -33,6 +33,21 @@ def test_calibrate_with_video_requires_context(tmp_path, monkeypatch) -> None:
         opai.calibrate_with_video(video_path, 2, 3, 3, 1.0, 0.5, "DICT_4X4_50")
 
 
+def test_verify_calibrated_parameters_requires_context(tmp_path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(context_store, "_ACTIVE_CONTEXT", None)
+    video_path = tmp_path / "demo.mp4"
+    video_path.write_bytes(b"demo")
+
+    with pytest.raises(OPAIContextError, match="Call opai.init"):
+        opai.verify_calibrated_parameters(
+            video_path=video_path,
+            n_check_imgs=2,
+            charuco_config_json={},
+            intrinsics_json={},
+        )
+
+
 def test_init_creates_context_directory(tmp_path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
     ctx = opai.init("session-001")
@@ -235,6 +250,100 @@ def test_calibrate_with_video_plots_detected_corners_when_enabled(
     assert pyplot.show_count == 1
     assert pyplot.close_calls == [pyplot.figure]
     assert np.array_equal(pyplot.axes[0].images[0], frames[0][..., ::-1])
+
+
+def test_verify_calibrated_parameters_uses_session_relative_json_paths(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    fake_cv2 = _build_fake_cv2()
+    monkeypatch.setattr(calibration_module, "cv2", fake_cv2)
+    monkeypatch.chdir(tmp_path)
+    ctx = opai.init("session-001")
+
+    frames = tuple(
+        np.full((10, 12, 3), fill_value=index, dtype=np.uint8) for index in range(3)
+    )
+    video_path = tmp_path / "demo.mp4"
+    video_path.write_bytes(b"demo")
+    monkeypatch.setattr(
+        calibration_module,
+        "sample_video_frames",
+        lambda **_kwargs: frames,
+    )
+    plot_calls: list[tuple[tuple[np.ndarray, ...], dict[str, object]]] = []
+
+    def fake_plot_frames(
+        plotted_frames: tuple[np.ndarray, ...] | list[np.ndarray],
+        **kwargs,
+    ) -> None:
+        plot_calls.append((tuple(plotted_frames), kwargs))
+
+    monkeypatch.setattr(calibration_module, "plot_frames", fake_plot_frames)
+
+    charuco_path = ctx.session_directory / "charuco_config.json"
+    charuco_path.write_text(
+        json.dumps(
+            {
+                "dictionary": "DICT_4X4_50",
+                "squares_x": 3,
+                "squares_y": 3,
+                "square_length": 1.0,
+                "marker_length": 0.5,
+                "image_width_px": 1200,
+                "image_height_px": 800,
+                "margin_size_px": 20,
+                "board_image_path": "charuco_board.png",
+            }
+        ),
+        encoding="utf-8",
+    )
+    intrinsics_path = ctx.session_directory / "calibration.json"
+    intrinsics_path.write_text(
+        json.dumps(
+            {
+                "mse_reproj_error": 0.1,
+                "image_height": 10,
+                "image_width": 12,
+                "intrinsic_type": "FISHEYE",
+                "intrinsics": {
+                    "aspect_ratio": 0.5,
+                    "focal_length": 10.0,
+                    "principal_pt_x": 5.0,
+                    "principal_pt_y": 6.0,
+                    "radial_distortion_1": 0.1,
+                    "radial_distortion_2": 0.2,
+                    "radial_distortion_3": 0.3,
+                    "radial_distortion_4": 0.4,
+                    "skew": 0.0,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = opai.verify_calibrated_parameters(
+        video_path=video_path,
+        n_check_imgs=2,
+        charuco_config_json="charuco_config.json",
+        intrinsics_json="calibration.json",
+        plot_result=True,
+        plot_nrows=1,
+        plot_ncols=2,
+    )
+
+    assert result.sampled_image_count == 2
+    assert result.verified_image_count == 2
+    assert result.total_detected_corner_count == 8
+    assert len(plot_calls) == 1
+    assert len(plot_calls[0][0]) == 2
+    assert plot_calls[0][1] == {"nrows": 1, "ncols": 2, "frames_are_bgr": True}
+    output_path = (
+        tmp_path / ".opai_sessions" / "session-001" / "calibration_verification.json"
+    )
+    assert output_path.exists()
+    payload = json.loads(output_path.read_text(encoding="utf-8"))
+    assert payload["verified_image_count"] == 2
 
 
 def test_calibrate_with_video_requires_matplotlib_for_detected_corner_plotting(
@@ -545,6 +654,37 @@ def test_browse_session_requires_rich(tmp_path, monkeypatch) -> None:
 
 
 def _build_fake_cv2() -> SimpleNamespace:
+    def fake_circle(
+        image: np.ndarray,
+        center: tuple[int, int],
+        _radius: int,
+        color: tuple[int, int, int],
+        _thickness: int,
+    ) -> np.ndarray:
+        x, y = center
+        if 0 <= y < image.shape[0] and 0 <= x < image.shape[1]:
+            image[y, x] = np.array(color, dtype=image.dtype)
+        return image
+
+    def fake_arrowed_line(
+        image: np.ndarray,
+        start: tuple[int, int],
+        end: tuple[int, int],
+        color: tuple[int, int, int],
+        _thickness: int,
+        *,
+        tipLength: float = 0.0,
+    ) -> np.ndarray:
+        del tipLength
+        midpoint = (
+            int(round((start[0] + end[0]) / 2)),
+            int(round((start[1] + end[1]) / 2)),
+        )
+        for x, y in (start, midpoint, end):
+            if 0 <= y < image.shape[0] and 0 <= x < image.shape[1]:
+                image[y, x] = np.array(color, dtype=image.dtype)
+        return image
+
     def fake_fisheye_calibrate(
         object_points,
         image_points,
@@ -630,6 +770,13 @@ def _build_fake_cv2() -> SimpleNamespace:
         COLOR_BGR2GRAY=1,
         COLOR_GRAY2BGR=2,
         cvtColor=fake_cvt_color,
+        arrowedLine=fake_arrowed_line,
+        circle=fake_circle,
+        solvePnP=lambda *_args, **_kwargs: (
+            True,
+            np.zeros((3, 1), dtype=np.float64),
+            np.zeros((3, 1), dtype=np.float64),
+        ),
         waitKey=lambda _delay: 0,
     )
 
@@ -653,7 +800,6 @@ def _install_fake_rich(
     class FakeConsole:
         def print(self, *_args, **_kwargs) -> None:
             recorder["prints"].append(_args)
-            return None
 
     monkeypatch.setitem(sys.modules, "rich", SimpleNamespace())
     monkeypatch.setitem(

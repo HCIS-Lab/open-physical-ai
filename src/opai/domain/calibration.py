@@ -42,6 +42,24 @@ class CalibrationResult:
 
 
 @dataclass(frozen=True)
+class CalibrationVerificationFrame:
+    sampled_frame_index: int
+    detected_corner_count: int
+    mse_reproj_error: float
+
+
+@dataclass(frozen=True)
+class CalibrationVerificationResult:
+    requested_check_image_count: int
+    sampled_image_count: int
+    verified_image_count: int
+    skipped_image_count: int
+    total_detected_corner_count: int
+    mse_reproj_error: float
+    frame_results: tuple[CalibrationVerificationFrame, ...]
+
+
+@dataclass(frozen=True)
 class CharucoBoardConfig:
     dictionary: str
     squares_x: int

@@ -85,7 +85,7 @@ def plot_frames(
 def _get_figsize(
     grid: PlotGrid,
     *,
-    imsize: float = 3.0,
+    imsize: float = 5.0,
     add_vert: float = 0.6,
 ) -> tuple[float, float]:
     return grid.ncols * imsize, grid.nrows * imsize + add_vert
