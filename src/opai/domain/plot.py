@@ -6,7 +6,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-BASE_SUBPLOT_WIDTH = 8.0
+BASE_SUBPLOT_WIDTH = 4.0
 BASE_SUBPLOT_HEIGHT = 3.0
 MAX_FIGURE_WIDTH = 16.0
 MAX_FIGURE_HEIGHT = 12.0
@@ -69,9 +69,10 @@ def plot_frames(
     flat_axes = np.atleast_1d(axes).reshape(-1)
 
     for axis, frame in zip(flat_axes, frames):
-        if frame.ndim != 2 and frames_are_bgr:
-            frame = frame[..., ::-1]
-        axis.imshow(frame)
+        image = _prepare_frame(frame, grid)
+        if image.ndim != 2 and frames_are_bgr:
+            image = image[..., ::-1]
+        axis.imshow(image)
         axis.set_axis_off()
 
     for axis in flat_axes[len(frames) :]:
@@ -84,8 +85,19 @@ def plot_frames(
 
 def _get_figsize(
     grid: PlotGrid,
-    *,
-    imsize: float = 5.0,
-    add_vert: float = 0.6,
 ) -> tuple[float, float]:
-    return grid.ncols * imsize, grid.nrows * imsize + add_vert
+    width = BASE_SUBPLOT_WIDTH * grid.ncols
+    height = BASE_SUBPLOT_HEIGHT * grid.nrows
+    scale = min(1.0, MAX_FIGURE_WIDTH / width, MAX_FIGURE_HEIGHT / height)
+    resolved_height = height * scale
+    if grid.nrows == 1:
+        resolved_height = max(resolved_height, MIN_SINGLE_ROW_FIGURE_HEIGHT)
+    return width * scale, min(resolved_height, MAX_FIGURE_HEIGHT)
+
+
+def _prepare_frame(frame: np.ndarray, grid: PlotGrid) -> np.ndarray:
+    max_height = max(1, MAX_CANVAS_HEIGHT // grid.nrows)
+    max_width = max(1, MAX_CANVAS_WIDTH // grid.ncols)
+    height, width = frame.shape[:2]
+    stride = max(1, math.ceil(height / max_height), math.ceil(width / max_width))
+    return frame[::stride, ::stride]
