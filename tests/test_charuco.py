@@ -51,8 +51,8 @@ def test_generate_charuco_board_writes_image_and_config(tmp_path, monkeypatch) -
 
     artifacts = opai.generate_charuco_board()
 
-    image_path = tmp_path / ".opai_sessions" / "session-001" / "charuco_board.png"
-    config_path = tmp_path / ".opai_sessions" / "session-001" / "charuco_config.json"
+    image_path = tmp_path / "sessions" / "session-001" / "charuco_board.png"
+    config_path = tmp_path / "sessions" / "session-001" / "charuco_config.json"
 
     assert artifacts.image_path == image_path
     assert artifacts.config_path == config_path

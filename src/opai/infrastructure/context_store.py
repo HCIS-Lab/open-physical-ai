@@ -10,7 +10,7 @@ from opai.infrastructure.persistence import (
 )
 
 _ACTIVE_CONTEXT: Context | None = None
-SESSION_ROOT_DIRNAME = ".opai_sessions"
+SESSION_ROOT_DIRNAME = "sessions"
 SESSION_MANIFEST_FILENAME = "session.json"
 
 
@@ -66,6 +66,7 @@ def session_root() -> Path:
 def _ensure_session_structure(session_directory: Path) -> None:
     (session_directory / "captures" / "demos").mkdir(parents=True, exist_ok=True)
     (session_directory / "captures" / "mapping").mkdir(parents=True, exist_ok=True)
+    (session_directory / "gopro_thumbnails").mkdir(parents=True, exist_ok=True)
 
 
 def _require_manifest_path(ctx: Context) -> Path:

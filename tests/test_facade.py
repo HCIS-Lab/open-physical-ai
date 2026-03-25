@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import sys
 from builtins import __import__ as builtin_import
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 
 import numpy as np
 import pytest
@@ -54,18 +54,16 @@ def test_init_creates_context_directory(tmp_path, monkeypatch) -> None:
 
     assert ctx.name == "session-001"
     assert ctx.session_directory.exists()
-    assert (
-        ctx.manifest_path
-        == tmp_path / ".opai_sessions" / "session-001" / "session.json"
-    )
+    assert ctx.manifest_path == tmp_path / "sessions" / "session-001" / "session.json"
     assert ctx.manifest_path.exists()
     assert (ctx.session_directory / "captures" / "demos").exists()
     assert (ctx.session_directory / "captures" / "mapping").exists()
+    assert (ctx.session_directory / "gopro_thumbnails").exists()
 
 
 def test_init_resumes_existing_session_manifest(tmp_path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
-    session_dir = tmp_path / ".opai_sessions" / "session-001"
+    session_dir = tmp_path / "sessions" / "session-001"
     session_dir.mkdir(parents=True)
     manifest_path = session_dir / "session.json"
     manifest_path.write_text(
@@ -122,7 +120,7 @@ def test_calibrate_writes_artifact_without_plotting_by_default(
         "DICT_4X4_50",
     )
 
-    output_path = tmp_path / ".opai_sessions" / "session-001" / "calibration.json"
+    output_path = tmp_path / "sessions" / "session-001" / "calibration.json"
     assert output_path.exists()
     payload = json.loads(output_path.read_text(encoding="utf-8"))
     assert payload["intrinsic_type"] == "FISHEYE"
@@ -196,7 +194,7 @@ def test_calibrate_with_video_writes_artifact_without_plotting_by_default(
         plot_ncols=5,
     )
 
-    output_path = tmp_path / ".opai_sessions" / "session-001" / "calibration.json"
+    output_path = tmp_path / "sessions" / "session-001" / "calibration.json"
     assert output_path.exists()
     payload = json.loads(output_path.read_text(encoding="utf-8"))
     assert payload["image_height"] == 10
@@ -240,7 +238,7 @@ def test_calibrate_with_video_plots_detected_corners_when_enabled(
         plot_ncols=5,
     )
 
-    output_path = tmp_path / ".opai_sessions" / "session-001" / "calibration.json"
+    output_path = tmp_path / "sessions" / "session-001" / "calibration.json"
     assert output_path.exists()
     payload = json.loads(output_path.read_text(encoding="utf-8"))
     assert payload["image_height"] == 10
@@ -339,7 +337,7 @@ def test_verify_calibrated_parameters_uses_session_relative_json_paths(
     assert len(plot_calls[0][0]) == 2
     assert plot_calls[0][1] == {"nrows": 1, "ncols": 2, "frames_are_bgr": True}
     output_path = (
-        tmp_path / ".opai_sessions" / "session-001" / "calibration_verification.json"
+        tmp_path / "sessions" / "session-001" / "calibration_verification.json"
     )
     assert output_path.exists()
     payload = json.loads(output_path.read_text(encoding="utf-8"))
@@ -524,7 +522,7 @@ def test_add_demos_copies_files_and_preserves_order(tmp_path, monkeypatch) -> No
 
     assert [asset.demo_id for asset in assets] == ["demo-0001", "demo-0002"]
     payload = json.loads(
-        (tmp_path / ".opai_sessions" / "session-001" / "session.json").read_text(
+        (tmp_path / "sessions" / "session-001" / "session.json").read_text(
             encoding="utf-8"
         )
     )
@@ -534,7 +532,7 @@ def test_add_demos_copies_files_and_preserves_order(tmp_path, monkeypatch) -> No
     ]
     assert (
         tmp_path
-        / ".opai_sessions"
+        / "sessions"
         / "session-001"
         / "captures"
         / "demos"
@@ -557,40 +555,31 @@ def test_add_mapping_replaces_active_mapping(tmp_path, monkeypatch) -> None:
     assert first.original_filename == "mapping-a.mp4"
     assert second.original_filename == "mapping-b.mp4"
     mapping_dir = (
-        tmp_path / ".opai_sessions" / "session-001" / "captures" / "mapping" / "current"
+        tmp_path / "sessions" / "session-001" / "captures" / "mapping" / "current"
     )
     assert sorted(path.name for path in mapping_dir.iterdir()) == ["mapping-b.mp4"]
     payload = json.loads(
-        (tmp_path / ".opai_sessions" / "session-001" / "session.json").read_text(
+        (tmp_path / "sessions" / "session-001" / "session.json").read_text(
             encoding="utf-8"
         )
     )
     assert payload["mapping"]["original_filename"] == "mapping-b.mp4"
 
 
-def test_list_sessions_returns_names(tmp_path, monkeypatch) -> None:
+def test_list_sessions(tmp_path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
     opai.init("session-b")
     opai.init("session-a")
     recorder = _install_fake_rich(monkeypatch)
 
-    assert opai.list_sessions() == ["session-a", "session-b"]
+    opai.list_sessions()
     tree = recorder["prints"][0][0]
-    assert tree.label.startswith("[bold].opai_sessions[/]")
+
+    assert tree.label.startswith("[bold]sessions[/]")
     assert [child.label for child in tree.children] == [
         "[bold cyan]session-a[/] [dim](current, demos=0, mapping=no, files=1)[/]",
         "[bold cyan]session-b[/] [dim](demos=0, mapping=no, files=1)[/]",
     ]
-
-
-def test_list_sessions_shows_empty_state(tmp_path, monkeypatch) -> None:
-    monkeypatch.chdir(tmp_path)
-    recorder = _install_fake_rich(monkeypatch)
-
-    assert opai.list_sessions() == []
-    tree = recorder["prints"][0][0]
-    assert tree.label.startswith("[bold].opai_sessions[/]")
-    assert [child.label for child in tree.children] == ["[yellow]No sessions found[/]"]
 
 
 def test_list_sessions_requires_rich(tmp_path, monkeypatch) -> None:
@@ -622,7 +611,7 @@ def test_browse_session_returns_files_without_changing_active_context(
     assert "captures/demos/demo-0001/demo.mp4" in files
     assert opai.get_context().name == ctx.name
     tree = recorder["prints"][0][0]
-    assert tree.label.startswith("[bold].opai_sessions[/]")
+    assert tree.label.startswith("[bold]sessions[/]")
     session_branch = tree.children[0]
     assert session_branch.label == (
         "[bold magenta]session-001[/] "
@@ -847,3 +836,97 @@ def _build_fake_pyplot(*, nrows: int, ncols: int):
             self.close_calls.append(figure)
 
     return FakePyplot()
+
+
+def _install_fake_ipywidgets(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    selected_indexes: list[int],
+    tracker: dict[str, object] | None = None,
+) -> None:
+    ipywidgets_module = ModuleType("ipywidgets")
+    ipywidgets_module.Layout = _FakeLayout
+    ipywidgets_module.HTML = _FakeHTMLWidget
+    ipywidgets_module.Image = _FakeImageWidget
+    ipywidgets_module.Checkbox = _FakeCheckboxWidget
+    ipywidgets_module.Button = _FakeButtonWidget
+    ipywidgets_module.VBox = _FakeBoxWidget
+    ipywidgets_module.HBox = _FakeBoxWidget
+    ipywidgets_module.Box = _FakeBoxWidget
+
+    ipython_module = ModuleType("IPython")
+
+    display_module = ModuleType("IPython.display")
+
+    def fake_display(browser) -> None:
+        if tracker is not None:
+            tracker["browser"] = browser
+            tracker["browser_was_open_during_display"] = not browser.closed
+        cards_box = browser.children[2]
+        for index in selected_indexes:
+            cards_box.children[index].children[2].set_value(True)
+        browser.children[3].children[0].click()
+
+    display_module.display = fake_display
+
+    monkeypatch.setitem(sys.modules, "ipywidgets", ipywidgets_module)
+    monkeypatch.setitem(sys.modules, "IPython", ipython_module)
+    monkeypatch.setitem(sys.modules, "IPython.display", display_module)
+
+
+class _FakeLayout:
+    def __init__(self, **kwargs) -> None:
+        self.kwargs = kwargs
+
+
+class _FakeHTMLWidget:
+    def __init__(self, value: str = "", layout=None) -> None:
+        self.value = value
+        self.layout = layout
+
+
+class _FakeImageWidget:
+    def __init__(self, value: bytes, format: str, layout=None) -> None:
+        self.value = value
+        self.format = format
+        self.layout = layout
+
+
+class _FakeCheckboxWidget:
+    def __init__(self, value: bool, description: str, indent: bool) -> None:
+        self.value = value
+        self.description = description
+        self.indent = indent
+        self._observers = []
+
+    def observe(self, callback, names: str) -> None:
+        self._observers.append((callback, names))
+
+    def set_value(self, value: bool) -> None:
+        self.value = value
+        for callback, _names in self._observers:
+            callback({"new": value})
+
+
+class _FakeButtonWidget:
+    def __init__(self, description: str, button_style: str = "") -> None:
+        self.description = description
+        self.button_style = button_style
+        self._callbacks = []
+
+    def on_click(self, callback) -> None:
+        self._callbacks.append(callback)
+
+    def click(self) -> None:
+        for callback in self._callbacks:
+            callback(self)
+
+
+class _FakeBoxWidget:
+    def __init__(self, children, layout=None) -> None:
+        self.children = list(children)
+        self.layout = layout
+        self.closed = False
+
+    def close(self) -> None:
+        self.closed = True

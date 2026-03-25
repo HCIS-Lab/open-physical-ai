@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html
 import re
 from collections.abc import Sequence
 from pathlib import Path
@@ -26,6 +27,7 @@ from opai.domain.calibration import (
     CharucoBoardConfig,
 )
 from opai.domain.context import Context
+from opai.domain.gopro import GPThumbnail
 from opai.domain.plot import plot_frames
 from opai.domain.session import DemoAsset, MappingAsset
 from opai.infrastructure.context_store import get_active_context, init_context
@@ -274,6 +276,19 @@ def list_sessions() -> list[str]:
         tree.add(f"[bold cyan]{session.name}[/] [dim]({', '.join(tags)})[/]")
     console.print(tree)
     return session_names
+
+
+def register_gopro(serial_number: str, download_thumbnails: bool = True) -> None:
+    ctx = get_context()
+    try:
+        from opai.application.gopro import register_gopro as register_gopro_with_context
+    except ModuleNotFoundError as exc:
+        raise OPAIDependencyError(
+            "GoPro registration requires the 'zeroconf' package. Install project dependencies before calling opai.register_gopro(...)."
+        ) from exc
+    register_gopro_with_context(
+        ctx, serial_number, download_thumbnails=download_thumbnails
+    )
 
 
 def browse_session(name: str) -> list[str]:
