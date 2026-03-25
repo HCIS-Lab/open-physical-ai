@@ -255,31 +255,10 @@ def list_sessions() -> list[str]:
     from opai.application.session import describe_sessions
 
     catalog = describe_sessions()
+    console = Console()
     tree = Tree(
         f"[bold]{catalog.root_dirname}[/] [dim]{catalog.root_path}[/]",
         guide_style="dim",
-    )
-    from opai.application.session import browse_session as browse_named_session
-
-    Console().print(tree)
-
-
-def register_gopro(serial_number: str, download_thumbnails: bool = True) -> None:
-    ctx = get_context()
-    try:
-        from opai.application.gopro import register_gopro as register_gopro_with_context
-    except ModuleNotFoundError as exc:
-        raise OPAIDependencyError(
-            "GoPro registration requires the 'zeroconf' package. Install project dependencies before calling opai.register_gopro(...)."
-        ) from exc
-    register_gopro_with_context(
-        ctx, serial_number, download_thumbnails=download_thumbnails
-    )
-
-
-def main() -> None:
-    print(
-        "Use opai.init(name), opai.add_demos(...), opai.add_mapping(...), and opai.calibrate(...) from Python."
     )
     session_names = [session.name for session in catalog.sessions]
     if not catalog.sessions:
@@ -297,6 +276,19 @@ def main() -> None:
         tree.add(f"[bold cyan]{session.name}[/] [dim]({', '.join(tags)})[/]")
     console.print(tree)
     return session_names
+
+
+def register_gopro(serial_number: str, download_thumbnails: bool = True) -> None:
+    ctx = get_context()
+    try:
+        from opai.application.gopro import register_gopro as register_gopro_with_context
+    except ModuleNotFoundError as exc:
+        raise OPAIDependencyError(
+            "GoPro registration requires the 'zeroconf' package. Install project dependencies before calling opai.register_gopro(...)."
+        ) from exc
+    register_gopro_with_context(
+        ctx, serial_number, download_thumbnails=download_thumbnails
+    )
 
 
 def browse_session(name: str) -> list[str]:
