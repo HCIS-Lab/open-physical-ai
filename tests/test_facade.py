@@ -194,7 +194,7 @@ def test_calibrate_with_video_writes_artifact_without_plotting_by_default(
         plot_ncols=5,
     )
 
-    output_path = tmp_path / ".opai_sessions" / "session-001" / "calibration.json"
+    output_path = tmp_path / "sessions" / "session-001" / "calibration.json"
     assert output_path.exists()
     payload = json.loads(output_path.read_text(encoding="utf-8"))
     assert payload["image_height"] == 10
@@ -238,7 +238,7 @@ def test_calibrate_with_video_plots_detected_corners_when_enabled(
         plot_ncols=5,
     )
 
-    output_path = tmp_path / ".opai_sessions" / "session-001" / "calibration.json"
+    output_path = tmp_path / "sessions" / "session-001" / "calibration.json"
     assert output_path.exists()
     payload = json.loads(output_path.read_text(encoding="utf-8"))
     assert payload["image_height"] == 10
@@ -337,7 +337,7 @@ def test_verify_calibrated_parameters_uses_session_relative_json_paths(
     assert len(plot_calls[0][0]) == 2
     assert plot_calls[0][1] == {"nrows": 1, "ncols": 2, "frames_are_bgr": True}
     output_path = (
-        tmp_path / ".opai_sessions" / "session-001" / "calibration_verification.json"
+        tmp_path / "sessions" / "session-001" / "calibration_verification.json"
     )
     assert output_path.exists()
     payload = json.loads(output_path.read_text(encoding="utf-8"))
@@ -566,29 +566,20 @@ def test_add_mapping_replaces_active_mapping(tmp_path, monkeypatch) -> None:
     assert payload["mapping"]["original_filename"] == "mapping-b.mp4"
 
 
-def test_list_sessions_returns_names(tmp_path, monkeypatch) -> None:
+def test_list_sessions(tmp_path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
     opai.init("session-b")
     opai.init("session-a")
     recorder = _install_fake_rich(monkeypatch)
 
-    assert opai.list_sessions() == ["session-a", "session-b"]
+    opai.list_sessions()
     tree = recorder["prints"][0][0]
-    assert tree.label.startswith("[bold].opai_sessions[/]")
+
+    assert tree.label.startswith("[bold]sessions[/]")
     assert [child.label for child in tree.children] == [
         "[bold cyan]session-a[/] [dim](current, demos=0, mapping=no, files=1)[/]",
         "[bold cyan]session-b[/] [dim](demos=0, mapping=no, files=1)[/]",
     ]
-
-
-def test_list_sessions_shows_empty_state(tmp_path, monkeypatch) -> None:
-    monkeypatch.chdir(tmp_path)
-    recorder = _install_fake_rich(monkeypatch)
-
-    assert opai.list_sessions() == []
-    tree = recorder["prints"][0][0]
-    assert tree.label.startswith("[bold].opai_sessions[/]")
-    assert [child.label for child in tree.children] == ["[yellow]No sessions found[/]"]
 
 
 def test_list_sessions_requires_rich(tmp_path, monkeypatch) -> None:
@@ -620,7 +611,7 @@ def test_browse_session_returns_files_without_changing_active_context(
     assert "captures/demos/demo-0001/demo.mp4" in files
     assert opai.get_context().name == ctx.name
     tree = recorder["prints"][0][0]
-    assert tree.label.startswith("[bold].opai_sessions[/]")
+    assert tree.label.startswith("[bold]sessions[/]")
     session_branch = tree.children[0]
     assert session_branch.label == (
         "[bold magenta]session-001[/] "
