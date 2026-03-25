@@ -2,7 +2,7 @@ from opai.application.calibration import (
     calibrate,
     generate_charuco_board,
     verify_calibrated_parameters,
-from opai.application.calibration import calibrate
+)
 from opai.application.gopro import (
     get_media_list,
     list_downloaded_thumbnails,

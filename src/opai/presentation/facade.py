@@ -27,8 +27,8 @@ from opai.domain.calibration import (
     CharucoBoardConfig,
 )
 from opai.domain.context import Context
-from opai.domain.plot import plot_frames
 from opai.domain.gopro import GPThumbnail
+from opai.domain.plot import plot_frames
 from opai.domain.session import DemoAsset, MappingAsset
 from opai.infrastructure.context_store import get_active_context, init_context
 
@@ -255,17 +255,13 @@ def list_sessions() -> list[str]:
     from opai.application.session import describe_sessions
 
     catalog = describe_sessions()
-    console = Console()
     tree = Tree(
         f"[bold]{catalog.root_dirname}[/] [dim]{catalog.root_path}[/]",
         guide_style="dim",
+    )
     from opai.application.session import browse_session as browse_named_session
 
-    file_paths, tree_payload = browse_named_session(normalized_name)
-    tree = Tree(normalized_name)
-    _append_tree_nodes(tree, tree_payload)
     Console().print(tree)
-    return file_paths
 
 
 def register_gopro(serial_number: str, download_thumbnails: bool = True) -> None:

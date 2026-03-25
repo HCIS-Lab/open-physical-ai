@@ -10,8 +10,8 @@ from opai.presentation.facade import (
     list_sessions,
     main,
     plot_video_frames,
-    verify_calibrated_parameters,
     register_gopro,
+    verify_calibrated_parameters,
 )
 
 __all__ = [

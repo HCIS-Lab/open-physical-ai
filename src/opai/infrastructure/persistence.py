@@ -14,7 +14,6 @@ from opai.domain.calibration import (
     CalibrationVerificationResult,
     CharucoBoardConfig,
 )
-from opai.domain.calibration import CalibrationResult
 from opai.domain.gopro import GPThumbnail, GPThumbnailIndex
 from opai.domain.session import DemoAsset, MappingAsset, SessionManifest
 
