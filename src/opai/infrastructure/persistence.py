@@ -16,6 +16,9 @@ from opai.domain.calibration import (
 )
 from opai.domain.gopro import GPThumbnail, GPThumbnailIndex
 from opai.domain.session import DemoAsset, MappingAsset, SessionManifest
+from opai.infrastructure.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 def write_calibration_result(
@@ -43,7 +46,7 @@ def write_calibration_result(
 
     output_path = session_directory / filename
     output_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-    print(f"Wrote calibration verification result to {output_path}")
+    logger.info("Wrote calibration result to %s", output_path)
     return output_path
 
 
@@ -71,7 +74,7 @@ def write_calibration_verification_result(
 
     output_path = session_directory / filename
     output_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-    print(f"Wrote calibration verification result to {output_path}")
+    logger.info("Wrote calibration verification result to %s", output_path)
     return output_path
 
 

@@ -1,4 +1,5 @@
 import json
+import logging
 from pathlib import Path
 
 import httpx
@@ -259,6 +260,16 @@ def test_register_gopro_skips_thumbnail_download_when_index_exists(
     ) == {"items": []}
 
 
+def test_register_gopro_logs_socket_address(tmp_path, caplog) -> None:
+    ctx = Context(name="session-001", session_directory=tmp_path)
+    caplog.set_level(logging.INFO, logger="opai")
+
+    register_gopro(ctx, "C3441320092154", download_thumbnails=False)
+
+    assert "Registered GoPro for session session-001" in caplog.text
+    assert "172.21.154.51:8080" in caplog.text
+
+
 def test_download_thumbnail_from_gopro_uses_thumbnail_endpoint(
     tmp_path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -394,7 +405,6 @@ class _FakeAsyncResponse:
 
     async def __aexit__(self, exc_type, exc, tb) -> None:
         del exc_type, exc, tb
-        return None
 
     def raise_for_status(self) -> None:
         return None
@@ -422,7 +432,6 @@ class _FakeAsyncClient:
 
     async def __aexit__(self, exc_type, exc, tb) -> None:
         del exc_type, exc, tb
-        return None
 
     async def get(self, url: str):
         response = self._get_responses[url]
@@ -449,7 +458,6 @@ class _FakeProgressBar:
 
     def __exit__(self, exc_type, exc, tb) -> None:
         del exc_type, exc, tb
-        return None
 
     def update(self, amount: int) -> None:
         self.updates.append(amount)

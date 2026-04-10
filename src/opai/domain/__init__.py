@@ -7,6 +7,7 @@ from opai.domain.calibration import (
 )
 from opai.domain.context import Context
 from opai.domain.gopro import GPThumbnail, GPThumbnailIndex
+from opai.domain.imu import IMUPayload, IMURecording, IMUSample, IMUStream
 from opai.domain.session import DemoAsset, MappingAsset, SessionManifest
 
 __all__ = [
@@ -18,6 +19,10 @@ __all__ = [
     "Context",
     "GPThumbnail",
     "GPThumbnailIndex",
+    "IMUPayload",
+    "IMURecording",
+    "IMUSample",
+    "IMUStream",
     "DemoAsset",
     "MappingAsset",
     "SessionManifest",
