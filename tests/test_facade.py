@@ -10,6 +10,7 @@ import pytest
 
 import opai
 from opai.application import calibration as calibration_module
+from opai.application import slam as slam_module
 from opai.core.exceptions import (
     OPAIContextError,
     OPAIDependencyError,
@@ -46,6 +47,39 @@ def test_verify_calibrated_parameters_requires_context(tmp_path, monkeypatch) ->
             charuco_config_json={},
             intrinsics_json={},
         )
+
+
+def test_run_extract_trajectories_batch_requires_context(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(context_store, "_ACTIVE_CONTEXT", None)
+
+    with pytest.raises(OPAIContextError, match="Call opai.init"):
+        opai.run_extract_trajectories_batch()
+
+
+def test_run_extract_trajectories_batch_uses_active_context(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    ctx = opai.init("session-001")
+    expected = {"processed_videos": [], "total_processed": 0}
+
+    def fake_run_extract_trajectories_batch(*, ctx):
+        assert ctx == opai.get_context()
+        return expected
+
+    monkeypatch.setattr(
+        slam_module,
+        "run_extract_trajectories_batch",
+        fake_run_extract_trajectories_batch,
+    )
+
+    assert opai.run_extract_trajectories_batch() == expected
+    assert opai.get_context() == ctx
 
 
 def test_init_creates_context_directory(tmp_path, monkeypatch) -> None:

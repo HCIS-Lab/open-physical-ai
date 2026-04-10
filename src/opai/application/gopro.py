@@ -13,6 +13,7 @@ from opai.core.exceptions import (
 )
 from opai.domain.context import Context
 from opai.domain.gopro import GPMedia, GPMediaList, GPThumbnail, GPThumbnailIndex
+from opai.infrastructure.logger import get_logger
 from opai.infrastructure.persistence import (
     load_gopro_thumbnail_index,
     write_gopro_thumbnail_index,
@@ -22,6 +23,8 @@ DEFAULT_TIMEOUT = 10
 CONNECT_TIMEOUT = 30
 DOWNLOAD_CHUNK_SIZE = 1024 * 1024
 THUMBNAIL_INDEX_FILENAME = "gopro_thumbnail_index.json"
+
+logger = get_logger(__name__)
 
 
 def ensure_gopro_connected(ctx: Context) -> None:
@@ -69,7 +72,13 @@ def register_gopro(
 
     socket_address_template = "172.2{}.1{}{}.51:8080"
     ctx.set_gopro_socket_address(socket_address_template.format(*serial_number[-3:]))
+    logger.info(
+        "Registered GoPro for session %s at %s",
+        ctx.name,
+        ctx.gopro_socket_address,
+    )
     if download_thumbnails:
+        logger.info("Downloading GoPro thumbnails for session %s", ctx.name)
         _download_thumbnails(ctx)
 
 
@@ -93,6 +102,12 @@ def download_file_from_gopro(
     url = f"http://{ctx.gopro_socket_address}/videos/DCIM/{source_directory}/{source_filename}"
 
     output_file = destination / (output_filename or source_filename)
+    logger.info(
+        "Downloading GoPro file %s/%s to %s",
+        source_directory,
+        source_filename,
+        output_file,
+    )
     _run_async(
         _download_stream_to_file(ctx, url, output_file, progress_label=output_file.name)
     )
@@ -110,10 +125,13 @@ async def _get_media_list(ctx: Context) -> GPMediaList:
 
     url = f"http://{ctx.gopro_socket_address}/gopro/media/list"
     try:
+        logger.info("Fetching GoPro media list from %s", ctx.gopro_socket_address)
         async with _create_async_client() as client:
             response = await client.get(url)
             response.raise_for_status()
-            return GPMediaList(**response.json())
+            media_list = GPMediaList(**response.json())
+            logger.info("Fetched %s GoPro media directories", len(media_list.media))
+            return media_list
     except httpx.HTTPError as exc:
         raise OPAIGoProRegistrationError(
             "Failed to fetch the GoPro media list. Verify the camera connection and try opai.register_gopro(...) again.",
@@ -135,14 +153,20 @@ def list_downloaded_thumbnails(ctx: Context) -> list[GPThumbnail]:
         raise OPAIValidationError(
             "No GoPro thumbnails found. Call opai.register_gopro(..., download_thumbnails=True) first."
         )
+    logger.info("Found %s downloaded GoPro thumbnails", len(items))
     return items
 
 
 def _download_thumbnails(ctx: Context) -> None:
     if _thumbnail_index_path(ctx).exists():
+        logger.info(
+            "Skipping GoPro thumbnail download because index already exists at %s",
+            _thumbnail_index_path(ctx),
+        )
         return
 
     destination_root = ctx.session_directory / "gopro_thumbnails"
+    logger.info("Downloading GoPro thumbnails into %s", destination_root)
     thumbnails: list[GPThumbnail] = []
     for media in get_media_list(ctx).media:
         thumbnails.extend(
@@ -163,6 +187,9 @@ def _download_thumbnails_for_directory(
     destination = destination_root / media.d
     destination.mkdir(parents=True, exist_ok=True)
     thumbnails: list[GPThumbnail] = []
+    logger.info(
+        "Downloading %s thumbnails from GoPro directory %s", len(media.fs), media.d
+    )
 
     for file in media.fs:
         thumbnail_filename = Path(file.n).with_suffix(".jpg").name
@@ -204,6 +231,7 @@ def _download_thumbnail_from_gopro(
 
     url = f"http://{ctx.gopro_socket_address}/gopro/media/thumbnail?path={media_path}"
     output_file = destination / output_filename
+    logger.info("Downloading GoPro thumbnail %s to %s", media_path, output_file)
     _run_async(
         _download_stream_to_file(ctx, url, output_file, progress_label=output_file.name)
     )
@@ -243,7 +271,14 @@ async def _download_stream_to_file(
                             handle.write(chunk)
                             progress_bar.update(len(chunk))
         temp_file.replace(output_file)
+        logger.info("Downloaded GoPro asset %s to %s", progress_label, output_file)
     except httpx.HTTPError as exc:
+        logger.error(
+            "Failed to download GoPro asset %s from %s: %s",
+            progress_label,
+            url,
+            exc,
+        )
         raise OPAIGoProRegistrationError(
             f"Failed to download '{progress_label}' from the GoPro.",
             details={

@@ -85,6 +85,10 @@ def add_mapping(ctx: Context, video_path: str | Path) -> MappingAsset:
     return mapping_asset
 
 
+def add_mapping_video(ctx: Context, video_path: str | Path) -> MappingAsset:
+    return add_mapping(ctx, video_path)
+
+
 def list_sessions() -> list[str]:
     return [session.name for session in describe_sessions().sessions]
 

@@ -14,6 +14,7 @@ dependencies = [
     "matplotlib>=3.10.7",
     "numpy>=2.2.6",
     "opencv-contrib-python-headless>=4.13.0.92",
+    "py-gpmf-parser>=0.1.1",
     "pydantic>=2.12.5",
     "rich>=14.1.0",
     "tqdm>=4.67.1",
@@ -67,3 +68,6 @@ lint.ignore = [
     "PLW2901",  # For loop variable overwritten.
     "PLW0642",  # Reassigned self in instance method.
 ]
+
+[tool.setuptools.package-data]
+opai = ["configs/*"]

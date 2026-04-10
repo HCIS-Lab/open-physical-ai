@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import html
 import re
 from collections.abc import Sequence
 from pathlib import Path
@@ -27,9 +26,9 @@ from opai.domain.calibration import (
     CharucoBoardConfig,
 )
 from opai.domain.context import Context
-from opai.domain.gopro import GPThumbnail
 from opai.domain.plot import plot_frames
 from opai.domain.session import DemoAsset, MappingAsset
+from opai.domain.slam import MappingRunResult
 from opai.infrastructure.context_store import get_active_context, init_context
 
 SESSION_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
@@ -237,11 +236,32 @@ def add_demos(video_paths: Sequence[str | Path]) -> tuple[DemoAsset, ...]:
     return add_demos_with_context(ctx, video_paths)
 
 
-def add_mapping(video_path: str | Path) -> MappingAsset:
+def add_mapping_video(video_path: str | Path) -> MappingAsset:
     ctx = get_context()
     from opai.application.session import add_mapping as add_mapping_with_context
 
     return add_mapping_with_context(ctx, video_path)
+
+
+def run_mapping(
+    slam_setting_path: str,
+) -> MappingRunResult:
+    ctx = get_context()
+    from opai.application.slam import run_mapping as run_mapping_with_context
+
+    return run_mapping_with_context(
+        ctx=ctx,
+        slam_setting_path=slam_setting_path,
+    )
+
+
+def run_extract_trajectories_batch() -> dict[str, object]:
+    ctx = get_context()
+    from opai.application.slam import (
+        run_extract_trajectories_batch as run_extract_trajectories_batch_with_context,
+    )
+
+    return run_extract_trajectories_batch_with_context(ctx=ctx)
 
 
 def list_sessions() -> list[str]:
@@ -347,7 +367,8 @@ def browse_session(name: str) -> list[str]:
 
 def main() -> None:
     print(
-        "Use opai.init(name), opai.add_demos(...), opai.add_mapping(...), "
+        "Use opai.init(name), opai.add_demos(...), opai.add_mapping_video(...), "
+        "opai.add_mapping(...), opai.run_mapping(...), opai.run_extract_trajectories_batch(...), "
         "opai.generate_charuco_board(...), opai.calibrate(...), "
         "opai.calibrate_with_video(...), opai.verify_calibrated_parameters(...), "
         "and opai.plot_video_frames(...) from Python."

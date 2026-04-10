@@ -1,6 +1,6 @@
 from opai.presentation.facade import (
     add_demos,
-    add_mapping,
+    add_mapping_video,
     browse_session,
     calibrate,
     calibrate_with_video,
@@ -11,12 +11,14 @@ from opai.presentation.facade import (
     main,
     plot_video_frames,
     register_gopro,
+    run_extract_trajectories_batch,
+    run_mapping,
     verify_calibrated_parameters,
 )
 
 __all__ = [
     "add_demos",
-    "add_mapping",
+    "add_mapping_video",
     "browse_session",
     "calibrate",
     "calibrate_with_video",
@@ -26,6 +28,8 @@ __all__ = [
     "list_sessions",
     "main",
     "plot_video_frames",
+    "run_extract_trajectories_batch",
+    "run_mapping",
     "verify_calibrated_parameters",
     "register_gopro",
 ]

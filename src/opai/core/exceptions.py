@@ -61,3 +61,9 @@ class OPAIGoProNotConnectedError(OPAIError, RuntimeError):
     """Raised when a workflow fails after input validation."""
 
     default_error_code = "gopro_not_connected_error"
+
+
+class OPAIPackageResourceError(OPAIError, RuntimeError):
+    """Raised when package resources cannot be loaded."""
+
+    default_error_code = "package_resource_error"

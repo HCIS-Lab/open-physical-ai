@@ -1757,6 +1757,7 @@ dependencies = [
     { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "numpy", version = "2.4.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
     { name = "opencv-contrib-python-headless" },
+    { name = "py-gpmf-parser" },
     { name = "pydantic" },
     { name = "rich" },
     { name = "tqdm" },
@@ -1779,6 +1780,7 @@ requires-dist = [
     { name = "numpy", specifier = ">=2.2.6" },
     { name = "opencv-contrib-python-headless", specifier = ">=4.13.0.92" },
     { name = "pre-commit", marker = "extra == 'dev'", specifier = "==3.3.2" },
+    { name = "py-gpmf-parser", specifier = ">=0.1.1" },
     { name = "pydantic", specifier = ">=2.12.5" },
     { name = "pyright", marker = "extra == 'dev'", specifier = ">=1.1.308" },
     { name = "pytest", marker = "extra == 'dev'" },
@@ -2052,6 +2054,20 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/cd/05/0a34433a064256a578f1783a10da6df098ceaa4a57bbeaa96a6c0352786b/pure_eval-0.2.3.tar.gz", hash = "sha256:5f4e983f40564c576c7c8635ae88db5956bb2229d7e9237d03b3c0b0190eaf42", size = 19752, upload-time = "2024-07-21T12:58:21.801Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/8e/37/efad0257dc6e593a18957422533ff0f87ede7c9c6ea010a2177d738fb82f/pure_eval-0.2.3-py3-none-any.whl", hash = "sha256:1db8e35b67b3d218d818ae653e27f06c3aa420901fa7b081ca98cbedc874e0d0", size = 11842, upload-time = "2024-07-21T12:58:20.04Z" },
+]
+
+[[package]]
+name = "py-gpmf-parser"
+version = "0.1.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "numpy", version = "2.4.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+]
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/5e/0b/2a00e75a281c0de0839a1e210eebee566cc62c35d59264c8fe00b6c75df3/py_gpmf_parser-0.1.1-cp310-cp310-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:993836967dc540f8419e69b94e23599944f71f70ffdc0b2c8ee1db037bd4cfbd", size = 2224375, upload-time = "2025-08-16T13:46:48.987Z" },
+    { url = "https://files.pythonhosted.org/packages/45/55/b7d06b5fb83652479f95bd41468642b18b8c0614dd1791dd4f585fcf1af3/py_gpmf_parser-0.1.1-cp311-cp311-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:1d874a1c4925ab371ccc2a5375257478f39ed84a7c8cc3eb8994a2933d4b8693", size = 2245060, upload-time = "2025-08-16T13:46:39.145Z" },
+    { url = "https://files.pythonhosted.org/packages/9f/8b/c3d5ea5ff587bb84f5b2f6a896b0a7c7b42e49db763f3b4f882aa686e2f7/py_gpmf_parser-0.1.1-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:4388b321e5d3d85614bb31650b17bddcf858ebae0f86c7c4a0ea81ccdf1dd085", size = 2276941, upload-time = "2025-08-16T13:46:44.481Z" },
 ]
 
 [[package]]
